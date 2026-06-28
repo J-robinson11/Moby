@@ -1,0 +1,45 @@
+name: Polymarket Value Scout
+
+# Runs the scan 3x/day in the cloud — no local machine needed.
+# NOTE: GitHub Actions cron is in UTC and does NOT observe Daylight Saving.
+# Times below are set for US Eastern during the 2026 World Cup (EDT = UTC-4):
+#   7:30 AM ET = 11:30 UTC | 12:30 PM ET = 16:30 UTC | 5:30 PM ET = 21:30 UTC
+# If you're in another timezone, or after DST changes, adjust the hours.
+on:
+  schedule:
+    - cron: "30 11,16,21 * * *"
+  workflow_dispatch: {}   # lets you trigger a manual run from the Actions tab
+
+jobs:
+  scout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Value Scout
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # --- Alert channel: set ONE. Discord (free) is the default. ---
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          # Or use ntfy.sh (free, no signup) instead of Discord:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          # Or paid SMS via Twilio:
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_FROM: ${{ secrets.TWILIO_FROM }}
+          ALERT_TO_PHONE: ${{ secrets.ALERT_TO_PHONE }}
+          # Optional overrides (uncomment to change):
+          # ANTHROPIC_MODEL: claude-sonnet-4-6
+          # MARKET_TAG: world-cup
+          # MIN_EDGE_PP: "4"
+        run: python value_scout.py
