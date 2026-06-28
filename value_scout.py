@@ -128,7 +128,7 @@ def clean_markets(events: list, min_liquidity: float, max_spread: float) -> list
 # 2. Claude edge analysis (with live web search)
 # ---------------------------------------------------------------------------
 ANALYSIS_INSTRUCTIONS = """\
-You are "Polymarket Value Scout," a disciplined sports-betting value analyst.
+You are "Poly," a disciplined sports-betting value analyst.
 
 You are given a list of live Polymarket 2026 FIFA World Cup markets with their
 implied probabilities (Polymarket mid, 0-1) and the best ask you'd pay to back
@@ -253,7 +253,7 @@ def log_bets(result: dict, run_at: str) -> None:
 def commit_log() -> None:
     """Commit bets_log.jsonl back to the repo so it persists across runs."""
     repo = os.path.join(os.path.dirname(__file__))
-    os.system(f'cd "{repo}" && git config user.email "scout@poly" && git config user.name "Poly Scout"')
+    os.system(f'cd "{repo}" && git config user.email "scout@poly" && git config user.name "Poly"')
     os.system(f'cd "{repo}" && git add bets_log.jsonl && git diff --cached --quiet || git commit -m "chore: log flagged bets"')
     os.system(f'cd "{repo}" && git push')
 
@@ -264,17 +264,34 @@ def commit_log() -> None:
 CONF_COLOR = {"High": 0x2ECC71, "Medium": 0xF1C40F, "Low": 0xE67E22}  # green / yellow / orange
 
 
+def _fmt_near_misses(near_misses) -> str:
+    """Turn the near_misses list into a readable bulleted string."""
+    if not near_misses:
+        return "None noted this run."
+    if isinstance(near_misses, str):
+        near_misses = [near_misses]
+    return "\n".join(f"• {str(nm)}" for nm in near_misses)[:1024]
+
+
 def build_discord_payload(result: dict) -> dict:
     flagged = result.get("flagged", [])
     summary = result.get("summary", "No qualifying bets this run.")
+    near_misses = result.get("near_misses", [])
+    n_eval = result.get("markets_evaluated")
+    scanned = f" ({n_eval} markets scanned)" if n_eval else ""
 
     if not flagged:
         return {
-            "username": "Poly Scout",
+            "username": "Poly",
             "embeds": [{
-                "title": "No value bets found",
-                "description": summary,
+                "title": "No value bets this run",
+                "description": summary[:4096],
                 "color": 0x95A5A6,
+                "fields": [
+                    {"name": "Closest calls (near misses)",
+                     "value": _fmt_near_misses(near_misses), "inline": False},
+                ],
+                "footer": {"text": f"Poly · strict by design{scanned}"},
             }],
         }
 
@@ -288,25 +305,35 @@ def build_discord_payload(result: dict) -> dict:
         # Discord rejects empty field values and truncates at 1024 chars.
         case_for = (bet.get("case_for") or "n/a")[:1024]
         case_against = (bet.get("case_against") or "n/a")[:1024]
+        # Render sources as a bulleted list (Discord caps a field at 1024 chars).
+        srcs = bet.get("sources") or []
+        if isinstance(srcs, str):
+            srcs = [srcs]
+        sources_txt = ("\n".join(f"• {s}" for s in srcs) or "n/a")[:1024]
+        fields = [
+            {"name": "Polymarket ask", "value": f"{poly_pct}%", "inline": True},
+            {"name": "Fair value", "value": f"{fair_pct}%", "inline": True},
+            {"name": "Edge", "value": f"+{edge}pp", "inline": True},
+            {"name": "Confidence", "value": conf, "inline": True},
+            {"name": "Stake guide",
+             "value": ("Larger" if conf == "High" else "Moderate" if conf == "Medium" else "Small / pass"),
+             "inline": True},
+            {"name": "Case for it", "value": case_for, "inline": False},
+            {"name": "Risks / case against", "value": case_against, "inline": False},
+            {"name": "Sources", "value": sources_txt, "inline": False},
+        ]
         embeds.append({
             "title": f"VALUE BET: {bet.get('outcome')}"[:256],
             "description": (bet.get("market") or "")[:4096],
             "color": color,
-            "fields": [
-                {"name": "Polymarket", "value": f"{poly_pct}%", "inline": True},
-                {"name": "Fair value", "value": f"{fair_pct}%", "inline": True},
-                {"name": "Edge", "value": f"+{edge}pp", "inline": True},
-                {"name": "Confidence", "value": conf, "inline": True},
-                {"name": "Case for", "value": case_for, "inline": False},
-                {"name": "Risk", "value": case_against, "inline": False},
-            ],
-            "footer": {"text": "Confirm price in Polymarket US app. Not financial advice."},
+            "fields": fields,
+            "footer": {"text": "Confirm live price in your Polymarket US app before betting. Not financial advice."},
         })
 
     if len(embeds) > 1:
-        embeds[0]["description"] += f"\n\n*+{len(embeds) - 1} more bet(s) below*"
+        embeds[0]["description"] += f"\n\n**{len(embeds)} bets flagged this run — see all cards below.**"
 
-    return {"username": "Poly Scout", "embeds": embeds[:10]}  # Discord max 10 embeds
+    return {"username": "Poly", "embeds": embeds[:10]}  # Discord max 10 embeds
 
 
 def send_alert(result: dict) -> None:
@@ -322,7 +349,7 @@ def send_alert(result: dict) -> None:
     flagged = result.get("flagged", [])
     summary = result.get("summary", "")
     if not flagged:
-        body = f"Poly Scout: No qualifying bets this run. {summary}"
+        body = f"Poly: No qualifying bets this run. {summary}"
     else:
         top = flagged[0]
         extra = f" (+{len(flagged) - 1} more)" if len(flagged) > 1 else ""
@@ -377,7 +404,7 @@ def main() -> int:
     dry_run = os.environ.get("DRY_RUN") == "1"
 
     now = datetime.now(timezone.utc).isoformat()
-    print(f"[{now}] Value Scout run | tag={tag} min_edge={min_edge_pp}pp model={model}")
+    print(f"[{now}] Poly run | tag={tag} min_edge={min_edge_pp}pp model={model}")
 
     events = fetch_events(tag)
     markets = clean_markets(events, min_liquidity, max_spread)
@@ -388,6 +415,7 @@ def main() -> int:
 
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     result = run_analysis(client, model, markets, min_edge_pp)
+    result["markets_evaluated"] = len(markets)
 
     print("Summary:", result.get("summary", ""))
     print("Near misses:", result.get("near_misses", []))

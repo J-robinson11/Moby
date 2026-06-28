@@ -1,4 +1,4 @@
-name: Polymarket Value Scout
+name: Poly
 
 # Runs the scan 3x/day in the cloud — no local machine needed.
 # NOTE: GitHub Actions cron is in UTC and does NOT observe Daylight Saving.
@@ -28,7 +28,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run Value Scout
+      - name: Run Poly
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # --- Alert channel: set ONE. Discord (free) is the default. ---
@@ -54,5 +54,5 @@ jobs:
         run: |
           RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           curl -sf -H "Content-Type: application/json" \
-            -d "{\"username\":\"Poly Scout\",\"embeds\":[{\"title\":\"⚠️ Scout run FAILED\",\"description\":\"The Polymarket Value Scout job failed. Check the logs and fix.\\n\\n[View run logs]($RUN_URL)\",\"color\":15158332}]}" \
+            -d "{\"username\":\"Poly\",\"embeds\":[{\"title\":\"⚠️ Poly run FAILED\",\"description\":\"The Poly job failed. Check the logs and fix.\\n\\n[View run logs]($RUN_URL)\",\"color\":15158332}]}" \
             "$DISCORD_WEBHOOK_URL"
