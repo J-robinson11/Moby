@@ -200,7 +200,7 @@ def run_analysis(client: Anthropic, model: str, markets: list, min_edge_pp: floa
         model=model,
         max_tokens=8000,
         system=system,
-        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 16}],
+        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 8}],
         messages=[{"role": "user", "content": user}],
     )
 
@@ -307,7 +307,7 @@ def main() -> int:
     min_edge_pp = float(os.environ.get("MIN_EDGE_PP", "4"))
     min_liquidity = float(os.environ.get("MIN_LIQUIDITY", "2000"))
     max_spread = float(os.environ.get("MAX_SPREAD", "0.04"))
-    model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+    model = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
     dry_run = os.environ.get("DRY_RUN") == "1"
 
     now = datetime.now(timezone.utc).isoformat()
