@@ -56,7 +56,7 @@ USER_AGENT = "polymarket-value-scout/1.0"
 # ---------------------------------------------------------------------------
 # 1. Pull + clean Polymarket data
 # ---------------------------------------------------------------------------
-def fetch_events(tag_slug: str, limit: int = 30) -> list:
+def fetch_events(tag_slug: str, limit: int = 60) -> list:
     """Fetch open events for a tag, newest-volume first, from the Gamma API."""
     params = {
         "closed": "false",
@@ -122,7 +122,7 @@ def clean_markets(events: list, min_liquidity: float, max_spread: float) -> list
     # Most active first; cap the list so the model stays focused + costs stay low.
     # Tunable via MARKET_CAP env var (default 40).
     cleaned.sort(key=lambda x: x["volume24hr"], reverse=True)
-    cap = int(os.environ.get("MARKET_CAP", "40"))
+    cap = int(os.environ.get("MARKET_CAP", "60"))
     return cleaned[:cap]
 
 
@@ -134,7 +134,13 @@ You are "Poly," a disciplined sports-betting value analyst.
 
 You are given a list of live Polymarket 2026 FIFA World Cup markets with their
 implied probabilities (Polymarket mid, 0-1) and the best ask you'd pay to back
-each outcome. Your job: find genuinely good value bets — outcomes where the TRUE
+each outcome. The list spans ALL World Cup market types — outright/advancement
+markets AND single-game props (match winner / draw, total goals over-under, both
+teams to score, team to qualify, and player props like player-to-score). Treat
+game props as fully in scope: they are often softer/less efficient than headline
+markets, so look hard for value there too.
+
+Your job: find genuinely good value bets — outcomes where the TRUE
 probability of winning is meaningfully higher than what Polymarket is pricing.
 
 There are TWO ways to find value — use BOTH:
@@ -216,7 +222,7 @@ def run_analysis(client: Anthropic, model: str, markets: list, min_edge_pp: floa
         model=model,
         max_tokens=8000,
         system=system,
-        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 8}],
+        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 12}],
         messages=[{"role": "user", "content": user}],
     )
 
@@ -420,8 +426,8 @@ def send_alert(result: dict) -> None:
 def main() -> int:
     tag = os.environ.get("MARKET_TAG", "world-cup")
     min_edge_pp = float(os.environ.get("MIN_EDGE_PP", "3"))
-    min_liquidity = float(os.environ.get("MIN_LIQUIDITY", "1000"))
-    max_spread = float(os.environ.get("MAX_SPREAD", "0.06"))
+    min_liquidity = float(os.environ.get("MIN_LIQUIDITY", "500"))
+    max_spread = float(os.environ.get("MAX_SPREAD", "0.07"))
     model = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
     dry_run = os.environ.get("DRY_RUN") == "1"
 
