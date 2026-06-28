@@ -209,6 +209,39 @@ absolutely nothing after it. The JSON block MUST appear or the run fails.
 """
 
 
+# Per-1M-token pricing (USD), keyed by a substring of the model id. Update if
+# Anthropic changes prices. Web search is billed separately, per request.
+MODEL_PRICING = {
+    "haiku":  {"in": 1.00,  "out": 5.00},   # Claude Haiku 4.5
+    "sonnet": {"in": 3.00,  "out": 15.00},  # Claude Sonnet 4.6
+    "opus":   {"in": 5.00,  "out": 25.00},  # Claude Opus 4.x
+}
+WEB_SEARCH_COST = 0.01  # ~$10 per 1,000 web_search requests
+
+
+def estimate_cost(model: str, usage) -> dict:
+    """Estimate run cost in USD from the response's usage object."""
+    price = next((v for k, v in MODEL_PRICING.items() if k in model), None)
+    in_tok = getattr(usage, "input_tokens", 0) or 0
+    out_tok = getattr(usage, "output_tokens", 0) or 0
+    # Web search count lives on usage.server_tool_use.web_search_requests.
+    stu = getattr(usage, "server_tool_use", None)
+    searches = getattr(stu, "web_search_requests", 0) or 0 if stu else 0
+
+    token_cost = 0.0
+    if price:
+        token_cost = (in_tok / 1_000_000) * price["in"] + (out_tok / 1_000_000) * price["out"]
+    search_cost = searches * WEB_SEARCH_COST
+    return {
+        "input_tokens": in_tok,
+        "output_tokens": out_tok,
+        "web_searches": searches,
+        "token_cost": round(token_cost, 4),
+        "search_cost": round(search_cost, 4),
+        "total_cost": round(token_cost + search_cost, 4),
+    }
+
+
 def run_analysis(client: Anthropic, model: str, markets: list, min_edge_pp: float) -> dict:
     payload = json.dumps(markets, indent=2)
     system = ANALYSIS_INSTRUCTIONS.format(min_edge_pp=min_edge_pp)
@@ -226,9 +259,19 @@ def run_analysis(client: Anthropic, model: str, markets: list, min_edge_pp: floa
         messages=[{"role": "user", "content": user}],
     )
 
+    # Log estimated cost for this run.
+    cost = estimate_cost(model, resp.usage)
+    print(
+        f"Cost: ${cost['total_cost']:.4f} "
+        f"(tokens ${cost['token_cost']:.4f} [{cost['input_tokens']} in / {cost['output_tokens']} out], "
+        f"{cost['web_searches']} web searches ${cost['search_cost']:.4f})"
+    )
+
     # Concatenate text blocks from the final assistant turn.
     text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
-    return parse_json_block(text)
+    result = parse_json_block(text)
+    result["_cost"] = cost
+    return result
 
 
 def parse_json_block(text: str) -> dict:
