@@ -214,7 +214,7 @@ def clean_markets(events: list, min_liquidity: float, max_spread: float) -> list
             )
 
     cap = int(os.environ.get("MARKET_CAP", "50"))
-    futures_slots = int(os.environ.get("FUTURES_SLOTS", "6"))
+    futures_slots = int(os.environ.get("FUTURES_SLOTS", "4"))
     futures_slots = max(0, min(futures_slots, cap))
 
     props = [m for m in cleaned if m["_priority"] in (0, 1, 3)]
@@ -391,15 +391,17 @@ def attach_smart_money(markets: list, min_smart_usd: float) -> list:
             continue
         m["smart_money"] = summary
         kept.append(m)
-    # Surface markets where SHARP traders are present + concentrated first, then
-    # fall back to raw money size.
+    # Match-level markets FIRST (game props, then player props), futures last —
+    # the user wants today's games prioritized, not the giant tournament futures.
+    # Within each type, strongest sharp signal first.
+    type_rank = {"game_prop": 0, "player_prop": 1, "other": 2, "future": 3}
     kept.sort(
         key=lambda x: (
-            x["smart_money"]["sharp_traders_present"],
-            x["smart_money"]["sharp_lean_pct"],
-            x["smart_money"]["total_smart_money_usd"],
-        ),
-        reverse=True,
+            type_rank.get(x.get("market_type"), 2),
+            -x["smart_money"]["sharp_traders_present"],
+            -x["smart_money"]["sharp_lean_pct"],
+            -x["smart_money"]["total_smart_money_usd"],
+        )
     )
     return kept
 
@@ -555,10 +557,19 @@ wins), and multiple. Apply these rules:
   - Prefer the higher-payout pick when two candidates have similar conviction.
   - Always report the pick's price and payout so the user sees the upside.
 
-You give a DAILY SLATE, so try to surface the best play(s) in EACH bucket — but
-only where the factors AND the payoff support a pick. Up to ~3 per bucket. If a
-bucket has nothing worth betting today, return an empty list for it and say so in
-the summary. Prefer UPCOMING games (soonest kickoff) for the prop buckets.
+MATCH-LEVEL BETS ARE THE PRIORITY. Spend the slate on game props and player
+props for upcoming/live matches. Futures (tournament winner, etc.) are only a
+GLANCE: include AT MOST 1 futures pick, and only if it's genuinely exceptional.
+If upcoming matches exist in the input, you MUST surface the best game/player
+props before considering any future. Do not fill the slate with futures.
+
+Up to ~3 game props and ~3 player props, plus at most 1 future. Only where the
+factors AND the payoff support a pick; otherwise return an empty list for that
+bucket. Prefer UPCOMING games (soonest kickoff).
+
+BE CONCISE. This goes to a phone. Each field is a SHORT phrase or ONE sentence —
+no paragraphs, no citations, no "<cite>" tags. smart_money ≤ 20 words. news ≤ 20
+words. rationale ≤ 1 sentence. contrarian_note ≤ 12 words.
 
 Conviction:
   - High:   smart money heavily lopsided AND news agrees AND (if available) the
@@ -584,10 +595,10 @@ exactly this schema:
         "price": <number 0-1, the back price of your pick>,
         "payout": "<e.g. '2.5x / +150%' — upside if it wins>",
         "kickoff": "<ISO time if known, else ''>",
-        "smart_money": "<short note: RAW lean (side, % and $) AND sharp lean (where proven winners sit, named if notable)>",
-        "news": "<short note: what recent news/sentiment says>",
-        "rationale": "<one or two sentences combining the factors>",
-        "contrarian_note": "<one sentence on the main risk, or 'none'>"
+        "smart_money": "<= 20 words: raw lean + sharp lean (name a notable sharp if any)>",
+        "news": "<= 20 words: what recent news says. No citations.>",
+        "rationale": "<= 1 sentence combining the factors>",
+        "contrarian_note": "<= 12 words on the main risk, or 'none'>"
       }
     ],
     "player_props": [ /* same shape */ ],
@@ -750,12 +761,28 @@ def commit_log() -> None:
 CONF_COLOR = {"High": 0x2ECC71, "Medium": 0xF1C40F, "Low": 0xE67E22}
 
 
+def _clean(text, limit=220) -> str:
+    """Strip citation tags / whitespace and truncate for a phone-sized field."""
+    s = str(text or "").replace("\n", " ")
+    # Drop any <cite ...>...</cite> wrappers the model might emit.
+    while "<cite" in s and ">" in s:
+        a = s.find("<cite")
+        b = s.find(">", a)
+        if b == -1:
+            break
+        s = s[:a] + s[b + 1:]
+    s = s.replace("</cite>", "").strip()
+    if len(s) > limit:
+        s = s[:limit - 1].rstrip() + "…"
+    return s or "n/a"
+
+
 def _fmt_list(items) -> str:
     if not items:
         return "None noted this run."
     if isinstance(items, str):
         items = [items]
-    return "\n".join(f"• {str(x)}" for x in items)[:1024]
+    return "\n".join(f"• {_clean(x, 160)}" for x in items[:3])[:1024]
 
 
 _BUCKET_LABEL = {"game_props": "GAME PROP", "player_props": "PLAYER PROP", "futures": "FUTURE"}
@@ -791,39 +818,35 @@ def build_discord_payload(result: dict) -> dict:
     )
     embeds = [{
         "username": "Moby",
-        "title": "🐋 Moby — Today's World Cup slate",
-        "description": f"{summary}\n\n**{header_lines}**"[:4096],
+        "title": "🐋 Moby — Today's slate",
+        "description": f"{_clean(summary, 280)}\n\n**{header_lines}**",
         "color": 0x3498DB,
-        "footer": {"text": f"Multi-factor sentiment{scanned}{tr_note}"},
+        "footer": {"text": f"Match-level first · futures = glance{scanned}{tr_note}"},
     }]
 
     for p in picks:
         conf = p.get("conviction", "Low")
         color = CONF_COLOR.get(conf, 0x95A5A6)
-        kickoff = p.get("kickoff") or ""
         price = p.get("price")
         price_str = f"{round(_to_float(price) * 100)}¢" if price not in (None, "") else "—"
-        payout_str = str(p.get("payout") or "—")[:256]
+        payout_str = _clean(p.get("payout"), 40)
+        # Compact: 3 inline stats + one short "why" + one short "risk".
         fields = [
-            {"name": "Pick", "value": str(p.get("pick") or "—")[:256], "inline": True},
             {"name": "Conviction", "value": conf, "inline": True},
-            {"name": "Bucket", "value": _BUCKET_LABEL.get(p["bucket"], p["bucket"]), "inline": True},
             {"name": "Price", "value": price_str, "inline": True},
-            {"name": "Payout if it hits", "value": payout_str, "inline": True},
-            {"name": "Smart money", "value": (str(p.get("smart_money") or "n/a"))[:1024], "inline": False},
-            {"name": "News / sentiment", "value": (str(p.get("news") or "n/a"))[:1024], "inline": False},
-            {"name": "Why", "value": (str(p.get("rationale") or "n/a"))[:1024], "inline": False},
-            {"name": "Contrarian flag", "value": (str(p.get("contrarian_note") or "none"))[:1024], "inline": False},
+            {"name": "Payout", "value": payout_str, "inline": True},
+            {"name": "Why", "value": _clean(p.get("rationale") or p.get("smart_money"), 280), "inline": False},
         ]
-        title = f"[{_BUCKET_LABEL[p['bucket']]}] {p.get('pick')}"
-        if kickoff:
-            title += f" · {kickoff[:16]}"
+        risk = _clean(p.get("contrarian_note"), 140)
+        if risk and risk.lower() not in ("none", "n/a"):
+            fields.append({"name": "Risk", "value": risk, "inline": False})
+        title = f"[{_BUCKET_LABEL[p['bucket']]}] {p.get('pick')} · {price_str}"
         embeds.append({
             "title": title[:256],
-            "description": (p.get("market") or "")[:4096],
+            "description": _clean(p.get("market"), 200),
             "color": color,
             "fields": fields,
-            "footer": {"text": "Sentiment read, not advice. Confirm in your Polymarket app."},
+            "footer": {"text": "Sentiment read, not advice."},
         })
 
     return {"username": "Moby", "embeds": embeds[:10]}  # Discord max 10 embeds
