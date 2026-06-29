@@ -153,6 +153,23 @@ def classify_market(question: str, event: str) -> tuple:
     return (3, "other")
 
 
+def payouts_for(outcomes: list, prices: list) -> dict:
+    """For each outcome, the back price and the upside if it wins.
+
+    profit_pct = (1 - price) / price * 100  → return per $1 staked.
+    A 0.90 favorite returns ~11%; a 0.40 pick returns ~150%.
+    """
+    out = {}
+    for name, p in zip(outcomes, prices):
+        if p and p > 0:
+            out[name] = {
+                "price": round(p, 3),
+                "profit_pct": round((1 - p) / p * 100),
+                "multiple": round(1 / p, 2),
+            }
+    return out
+
+
 def clean_markets(events: list, min_liquidity: float, max_spread: float) -> list:
     """Flatten events -> markets; keep liquid, tight-spread ones; prioritize."""
     cleaned = []
@@ -190,6 +207,7 @@ def clean_markets(events: list, min_liquidity: float, max_spread: float) -> list
                     "_ts": ts,
                     "outcomes": outcomes,
                     "implied_prob": prices,  # 0-1, Polymarket mid
+                    "payout_by_outcome": payouts_for(outcomes, prices),
                     "volume24hr": _to_float(m.get("volume24hr")),
                     "liquidity": liquidity,
                 }
@@ -523,10 +541,24 @@ You weigh MULTIPLE sentiment factors for each market, in roughly this priority:
    to CALIBRATE confidence: if a category has been hitting, lean into it slightly;
    if it's been missing, be more cautious there. Do not over-fit a tiny sample.
 
+PAYOFF MATTERS — this is important. The user wants bets that actually MAKE MONEY,
+not near-certain favorites with trivial upside. Each market includes
+"payout_by_outcome" with each side's back price, profit_pct (return per $1 if it
+wins), and multiple. Apply these rules:
+  - AVOID picks whose back price is >= 0.85 (return under ~18%) UNLESS conviction
+    is exceptional and the sharp evidence is overwhelming. A 90%-priced favorite
+    is usually NOT worth surfacing — there's no real money in it.
+  - Also avoid pure longshots priced <= 0.12 unless the sharp money is genuinely
+    piling in (these are mostly lottery tickets).
+  - The sweet spot is roughly 0.20-0.75 back price: meaningful payout AND a
+    realistic chance, where sharp money on that side is the real signal.
+  - Prefer the higher-payout pick when two candidates have similar conviction.
+  - Always report the pick's price and payout so the user sees the upside.
+
 You give a DAILY SLATE, so try to surface the best play(s) in EACH bucket — but
-only where the factors actually support a pick. Up to ~3 per bucket. If a bucket
-has nothing worth betting today, return an empty list for it and say so in the
-summary. Prefer UPCOMING games (soonest kickoff) for the prop buckets.
+only where the factors AND the payoff support a pick. Up to ~3 per bucket. If a
+bucket has nothing worth betting today, return an empty list for it and say so in
+the summary. Prefer UPCOMING games (soonest kickoff) for the prop buckets.
 
 Conviction:
   - High:   smart money heavily lopsided AND news agrees AND (if available) the
@@ -549,6 +581,8 @@ exactly this schema:
         "market": "<exact market question>",
         "pick": "<the outcome you'd back>",
         "conviction": "High|Medium|Low",
+        "price": <number 0-1, the back price of your pick>,
+        "payout": "<e.g. '2.5x / +150%' — upside if it wins>",
         "kickoff": "<ISO time if known, else ''>",
         "smart_money": "<short note: RAW lean (side, % and $) AND sharp lean (where proven winners sit, named if notable)>",
         "news": "<short note: what recent news/sentiment says>",
@@ -767,10 +801,15 @@ def build_discord_payload(result: dict) -> dict:
         conf = p.get("conviction", "Low")
         color = CONF_COLOR.get(conf, 0x95A5A6)
         kickoff = p.get("kickoff") or ""
+        price = p.get("price")
+        price_str = f"{round(_to_float(price) * 100)}¢" if price not in (None, "") else "—"
+        payout_str = str(p.get("payout") or "—")[:256]
         fields = [
             {"name": "Pick", "value": str(p.get("pick") or "—")[:256], "inline": True},
             {"name": "Conviction", "value": conf, "inline": True},
             {"name": "Bucket", "value": _BUCKET_LABEL.get(p["bucket"], p["bucket"]), "inline": True},
+            {"name": "Price", "value": price_str, "inline": True},
+            {"name": "Payout if it hits", "value": payout_str, "inline": True},
             {"name": "Smart money", "value": (str(p.get("smart_money") or "n/a"))[:1024], "inline": False},
             {"name": "News / sentiment", "value": (str(p.get("news") or "n/a"))[:1024], "inline": False},
             {"name": "Why", "value": (str(p.get("rationale") or "n/a"))[:1024], "inline": False},
