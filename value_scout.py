@@ -90,6 +90,26 @@ def _to_float(x, default=0.0):
         return default
 
 
+_FAR_FUTURE = 9_999_999_999.0  # sorts undated markets last among "upcoming"
+
+
+def _parse_ts(*candidates) -> float:
+    """Parse the first valid ISO8601 timestamp into epoch seconds.
+
+    Returns a large sentinel if none parse, so dated markets sort ahead of
+    undated ones when ordering by 'soonest'.
+    """
+    for raw in candidates:
+        if not raw or not isinstance(raw, str):
+            continue
+        try:
+            iso = raw.replace("Z", "+00:00")
+            return datetime.fromisoformat(iso).timestamp()
+        except ValueError:
+            continue
+    return _FAR_FUTURE
+
+
 # Keyword hints for classifying a market by type. Lower number = scanned first.
 # Priority order requested: game props -> player props -> futures -> other.
 _PLAYER_HINTS = (
@@ -110,12 +130,16 @@ _FUTURE_HINTS = (
 
 
 def classify_market(question: str, event: str) -> tuple:
-    """Return (priority, label). Lower priority is scanned/ranked first."""
+    """Return (priority, label). Lower priority is scanned/ranked first.
+
+    Game hints are checked before player hints so match-level phrases like
+    'both teams to score' aren't miscaught by the broad 'to score' player hint.
+    """
     text = f"{question} {event}".lower()
-    if any(h in text for h in _PLAYER_HINTS):
-        return (1, "player_prop")
     if any(h in text for h in _GAME_HINTS):
         return (0, "game_prop")
+    if any(h in text for h in _PLAYER_HINTS):
+        return (1, "player_prop")
     if any(h in text for h in _FUTURE_HINTS):
         return (2, "future")
     return (3, "other")
@@ -139,12 +163,20 @@ def clean_markets(events: list, min_liquidity: float, max_spread: float) -> list
                 continue
             question = m.get("question", "")
             priority, label = classify_market(question, ev_title)
+            # Kickoff/closing time, soonest first, for "upcoming games" priority.
+            ts = _parse_ts(
+                m.get("gameStartTime"), m.get("startDate"),
+                ev.get("startDate"), m.get("endDate"), ev.get("endDate"),
+            )
             cleaned.append(
                 {
                     "event": ev_title,
                     "question": question,
                     "market_type": label,
+                    "starts": m.get("gameStartTime") or m.get("startDate")
+                    or ev.get("startDate") or m.get("endDate") or "",
                     "_priority": priority,
+                    "_ts": ts,
                     "outcomes": outcomes,
                     "implied_prob": prices,           # 0-1, Polymarket mid
                     "best_ask": _to_float(m.get("bestAsk")),
@@ -154,15 +186,34 @@ def clean_markets(events: list, min_liquidity: float, max_spread: float) -> list
                     "liquidity": liquidity,
                 }
             )
-    # Sort by requested type priority (game props first, then player props,
-    # then futures), and by 24h volume within each type. Cap the list to keep
-    # the model focused + costs down.
-    cleaned.sort(key=lambda x: (x["_priority"], -x["volume24hr"]))
+
     cap = int(os.environ.get("MARKET_CAP", "60"))
-    top = cleaned[:cap]
-    for m in top:
-        m.pop("_priority", None)  # internal sort key; don't ship to the model
-    return top
+    # Reserve a small slice for futures so each run is mostly props but still
+    # peeks at the big tournament markets. Tunable via FUTURES_SLOTS.
+    futures_slots = int(os.environ.get("FUTURES_SLOTS", "8"))
+    futures_slots = max(0, min(futures_slots, cap))
+
+    # Props (game + player) and "other": rank by soonest kickoff, then volume —
+    # this is what surfaces UPCOMING games first.
+    props = [m for m in cleaned if m["_priority"] in (0, 1, 3)]
+    futures = [m for m in cleaned if m["_priority"] == 2]
+    props.sort(key=lambda x: (x["_priority"], x["_ts"], -x["volume24hr"]))
+    futures.sort(key=lambda x: (x["_ts"], -x["volume24hr"]))
+
+    props_slots = cap - futures_slots
+    selected = props[:props_slots] + futures[:futures_slots]
+    # If one bucket was short, backfill from leftovers up to the cap.
+    if len(selected) < cap:
+        chosen = {id(m) for m in selected}
+        leftovers = [m for m in props[props_slots:] + futures[futures_slots:]
+                     if id(m) not in chosen]
+        leftovers.sort(key=lambda x: (x["_priority"], x["_ts"], -x["volume24hr"]))
+        selected += leftovers[: cap - len(selected)]
+
+    for m in selected:
+        m.pop("_priority", None)  # internal sort keys; don't ship to the model
+        m.pop("_ts", None)
+    return selected
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +238,9 @@ order, spending most of your effort on the earlier ones:
   3. future     — tournament winner, advancement, group winner. Most efficient;
                   least likely to be mispriced.
 Game and player props are where mispricing usually hides, so prioritize them.
+The list is ordered with UPCOMING games first (soonest kickoff), and contains
+mostly props plus a small sample of futures — focus on the props for imminent
+matches, since fresh team/lineup/injury news moves those lines most.
 
 Your job: find genuinely good value bets — outcomes where the TRUE
 probability of winning is meaningfully higher than what Polymarket is pricing
