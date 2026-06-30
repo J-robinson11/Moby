@@ -253,26 +253,41 @@ def clean_markets(events: list, min_liquidity: float, max_spread: float) -> list
     futures_slots = int(os.environ.get("FUTURES_SLOTS", "4"))
     futures_slots = max(0, min(futures_slots, cap))
 
-    # --- Time window: prioritize the games that are about to happen, drop the
-    # ones already (nearly) over. Each run focuses on its own slice of the day. ---
+    # --- Time window: surface games about to start AND live games that still
+    # have meaningful time left; drop only the ones finished / in the final
+    # stretch. Wall-clock since kickoff ≈ minutes played + 15min halftime, so a
+    # game ~75min played is ~90min of wall-clock — that's the cutoff. ---
     now_ts = datetime.now(timezone.utc).timestamp()
-    grace = float(os.environ.get("LIVE_GRACE_MIN", "75")) * 60      # drop games kicked off > this ago
-    window = float(os.environ.get("WINDOW_HOURS", "12")) * 3600     # "soon" = within this many hours
+    grace = float(os.environ.get("LIVE_GRACE_MIN", "105")) * 60     # drop games kicked off > this ago (~75min played)
+    window = float(os.environ.get("WINDOW_HOURS", "12")) * 3600     # how far ahead "today's slate" reaches
+    imminent = float(os.environ.get("IMMINENT_HOURS", "4")) * 3600  # top-tier upcoming window
     for m in cleaned:
-        m["_ttk"] = (m["_ts"] - now_ts) if m["_ts"] != _FAR_FUTURE else None  # seconds to kickoff
+        ttk = (m["_ts"] - now_ts) if m["_ts"] != _FAR_FUTURE else None  # seconds to kickoff
+        m["_ttk"] = ttk
+        if ttk is None:
+            m["status"] = "undated"
+        elif ttk < 0:
+            m["status"] = "live"
+            m["mins_since_kickoff"] = round(-ttk / 60)
+        else:
+            m["status"] = "upcoming"
+            m["mins_to_kickoff"] = round(ttk / 60)
 
     def prop_key(m):
-        """Tier 0 = upcoming soon, 1 = live (just started), 2 = far upcoming,
-        3 = undated. Within a tier: game props before player, soonest first."""
+        """Tier 0 = live (time left) OR imminent upcoming, 1 = later today,
+        2 = far upcoming, 3 = undated. Within a tier: game props before player."""
         ttk = m["_ttk"]
         if ttk is None:
             return (3, m["_priority"], 0)
-        if ttk >= 0:
-            tier = 0 if ttk <= window else 2
-            return (tier, m["_priority"], ttk)
-        return (1, m["_priority"], -ttk)  # in-play, recently kicked off
+        if ttk < 0:
+            return (0, m["_priority"], -ttk)      # live, not near the end → top tier
+        if ttk <= imminent:
+            return (0, m["_priority"], ttk)       # kicking off soon → top tier
+        if ttk <= window:
+            return (1, m["_priority"], ttk)       # later today
+        return (2, m["_priority"], ttk)           # far off
 
-    # Exclude finished/late props (kicked off more than `grace` ago).
+    # Exclude only finished / final-stretch props (kicked off more than grace ago).
     props = [m for m in cleaned
              if m["_priority"] in (0, 1, 3)
              and not (m["_ttk"] is not None and m["_ttk"] < -grace)]
@@ -622,15 +637,18 @@ wins), and multiple. Apply these rules:
   - Prefer the higher-payout pick when two candidates have similar conviction.
   - Always report the pick's price and payout so the user sees the upside.
 
-TIMING — THIS RUN HAS A WINDOW. "run_context" gives the current time (now_utc),
-this run's label, and a window. Each market has a "starts" time. Rules:
-  - Recommend bets on games that are UPCOMING (kicking off after now) — prioritize
-    the SOONEST upcoming matches in this run's window.
-  - A game that already kicked off and is late/most-of-the-way through is STALE —
-    do NOT recommend it (e.g. don't pick a game that's in the 80th minute). The
-    next run will have already moved on; so should you.
-  - Do not re-recommend the same game a previous run already covered if it's now
-    underway — move to the next slate of games.
+TIMING — THIS RUN HAS A WINDOW. "run_context" gives the current time (now_utc)
+and this run's label. Each market has a "status" field:
+  - "upcoming" (+ mins_to_kickoff): not started yet. Prioritize the SOONEST.
+  - "live" (+ mins_since_kickoff): in progress. THESE ARE FAIR GAME as long as
+    there's meaningful time left (roughly before ~75 min played). For a live
+    game, pick in-play markets that STILL have value with time remaining — next
+    goal, total goals, a team to score, comeback/draw lines — not something
+    already effectively decided.
+  - SKIP only games in the final stretch / finished (no time for value left).
+    Don't re-recommend a game an earlier run already covered if it's now nearly
+    over — move to the next matches.
+Surface a healthy mix: the next upcoming games AND any live games with time left.
 
 MATCH-LEVEL BETS ARE THE PRIORITY. Spend the slate on game props and player
 props for upcoming matches. Futures (tournament winner, etc.) are only a GLANCE:
