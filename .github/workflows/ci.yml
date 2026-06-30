@@ -34,8 +34,21 @@ jobs:
           for fn in ("clean_markets", "summarize_holders", "parse_json_block",
                      "build_discord_payload", "send_alert", "log_signals",
                      "flatten_picks", "load_track_record", "fetch_x_sentiment",
-                     "fetch_sharp_traders", "sharp_weight"):
+                     "fetch_sharp_traders", "sharp_weight", "run_slot_label",
+                     "prune_low_upside"):
               assert hasattr(moby, fn), f"missing function: {fn}"
+
+          # 1b. Run-slot label snaps drifted run times to clean Central slots.
+          from datetime import datetime, timezone
+          assert moby.run_slot_label(datetime(2026, 6, 29, 22, 30, tzinfo=timezone.utc)) == "5:00 PM"
+
+          # 1c. Zero/low-upside picks are pruned (a 100c lock must never ship).
+          r = {"picks": {"game_props": [
+              {"market": "lock", "pick": "Yes", "price": 1.0, "conviction": "High"},
+              {"market": "value", "pick": "X", "price": 0.55, "conviction": "High"},
+          ], "player_props": [], "futures": []}}
+          assert moby.prune_low_upside(r, max_price=0.90) == 1
+          assert [p["market"] for p in r["picks"]["game_props"]] == ["value"]
 
           # 2. Market classification works.
           assert moby.classify_market("Argentina vs Brazil total goals", "")[1] == "game_prop"
