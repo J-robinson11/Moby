@@ -31,8 +31,11 @@ Twilio:
 Optional:
   ANTHROPIC_MODEL       - default "claude-haiku-4-5-20251001"
   MARKET_TAG            - default "fifa-world-cup" (incl. live match markets)
-  MARKET_CAP            - default 50 (markets analyzed per run)
-  FUTURES_SLOTS         - default 6 (slots reserved for futures markets)
+  MARKET_CAP            - default 60 (markets analyzed per run)
+  FUTURES_SLOTS         - default 4 (slots reserved for futures markets)
+  WINDOW_HOURS          - default 18 (outer reach of a run's slate)
+  NEXT_RUN_BUFFER_MIN   - default 60 (grace past the next run for "last chance")
+  LIVE_GRACE_MIN        - default 105 (drop live games kicked off > this ago)
   MIN_LIQUIDITY         - default 500
   MAX_SPREAD            - default 0.07
   MIN_SMART_MONEY_USD   - default 2000 (skip markets with little big-money interest)
@@ -168,6 +171,30 @@ def run_slot_label(now_utc: datetime = None) -> str:
     return f"{h12}:00 {ampm}"
 
 
+_RUN_SLOTS_CT = (7, 12, 17)  # Central hours of the 3 daily runs
+_SLOT_LABELS = {7: "7:00 AM", 12: "12:00 PM", 17: "5:00 PM"}
+
+
+def next_scheduled_run(now_utc: datetime = None):
+    """Return (utc_timestamp, label) of the NEXT scheduled run (Central
+    7AM/12PM/5PM).
+
+    Any game that kicks off before this gets no other Moby run first, so the
+    current run is its only chance to bet it. Central = UTC-5 (CDT, summer),
+    matching run_slot_label. The tz-shift trick: subtract 5h to read Central
+    wall-clock, pick the next slot, add 5h back to return the true UTC instant.
+    """
+    now_utc = now_utc or datetime.now(timezone.utc)
+    ct = now_utc - timedelta(hours=5)
+    for h in _RUN_SLOTS_CT:
+        slot = ct.replace(hour=h, minute=0, second=0, microsecond=0)
+        if slot > ct:
+            return ((slot + timedelta(hours=5)).timestamp(), _SLOT_LABELS[h])
+    # Past the last slot today -> first slot tomorrow.
+    slot = ct.replace(hour=_RUN_SLOTS_CT[0], minute=0, second=0, microsecond=0) + timedelta(days=1)
+    return ((slot + timedelta(hours=5)).timestamp(), _SLOT_LABELS[_RUN_SLOTS_CT[0]])
+
+
 def prune_low_upside(result: dict, max_price: float = 0.90, min_price: float = 0.05) -> int:
     """Drop picks with no real upside (priced >= max_price, e.g. a 100¢ lock) or
     pure longshots (<= min_price). Hard backstop so a 0%-payout pick never ships."""
@@ -249,42 +276,50 @@ def clean_markets(events: list, min_liquidity: float, max_spread: float) -> list
                 }
             )
 
-    cap = int(os.environ.get("MARKET_CAP", "50"))
+    cap = int(os.environ.get("MARKET_CAP", "60"))
     futures_slots = int(os.environ.get("FUTURES_SLOTS", "4"))
     futures_slots = max(0, min(futures_slots, cap))
 
-    # --- Time window: surface games about to start AND live games that still
-    # have meaningful time left; drop only the ones finished / in the final
-    # stretch. Wall-clock since kickoff ≈ minutes played + 15min halftime, so a
-    # game ~75min played is ~90min of wall-clock — that's the cutoff. ---
-    now_ts = datetime.now(timezone.utc).timestamp()
-    grace = float(os.environ.get("LIVE_GRACE_MIN", "105")) * 60     # drop games kicked off > this ago (~75min played)
-    window = float(os.environ.get("WINDOW_HOURS", "12")) * 3600     # how far ahead "today's slate" reaches
-    imminent = float(os.environ.get("IMMINENT_HOURS", "4")) * 3600  # top-tier upcoming window
+    # --- Time window keyed to the NEXT scheduled run. Any game that kicks off
+    # (or is live with time left) BEFORE the next run is "last chance" — this run
+    # is its only shot at a Moby bet, so it's top priority. Games after the next
+    # run can wait; the next run will cover them. Live games are dropped only once
+    # finished / in the final stretch (wall-clock since kickoff ≈ mins played +
+    # 15min halftime, so ~75min played ≈ ~90min wall-clock — that's the cutoff).
+    now_dt = datetime.now(timezone.utc)
+    now_ts = now_dt.timestamp()
+    grace = float(os.environ.get("LIVE_GRACE_MIN", "105")) * 60       # drop games kicked off > this ago (~75min played)
+    window = float(os.environ.get("WINDOW_HOURS", "18")) * 3600       # outer reach of the slate at all
+    buffer = float(os.environ.get("NEXT_RUN_BUFFER_MIN", "60")) * 60  # grace past the next run (absorbs scheduler drift)
+    last_chance_until = next_scheduled_run(now_dt)[0] + buffer        # bet-now-or-never boundary
     for m in cleaned:
         ttk = (m["_ts"] - now_ts) if m["_ts"] != _FAR_FUTURE else None  # seconds to kickoff
         m["_ttk"] = ttk
         if ttk is None:
             m["status"] = "undated"
+            m["last_chance"] = False
         elif ttk < 0:
             m["status"] = "live"
             m["mins_since_kickoff"] = round(-ttk / 60)
+            m["last_chance"] = True                          # live w/ time left = only chance now
         else:
             m["status"] = "upcoming"
             m["mins_to_kickoff"] = round(ttk / 60)
+            m["last_chance"] = m["_ts"] <= last_chance_until  # kicks off before the next run
 
     def prop_key(m):
-        """Tier 0 = live (time left) OR imminent upcoming, 1 = later today,
-        2 = far upcoming, 3 = undated. Within a tier: game props before player."""
+        """Tier 0 = last chance (live w/ time left OR kicks off before the next
+        run), 1 = later (the next run will cover it), 2 = far, 3 = undated.
+        Within a tier: game props before player props, sooner before later."""
         ttk = m["_ttk"]
         if ttk is None:
             return (3, m["_priority"], 0)
         if ttk < 0:
-            return (0, m["_priority"], -ttk)      # live, not near the end → top tier
-        if ttk <= imminent:
-            return (0, m["_priority"], ttk)       # kicking off soon → top tier
+            return (0, m["_priority"], -ttk)      # live, time left → last chance
+        if m["_ts"] <= last_chance_until:
+            return (0, m["_priority"], ttk)       # before next run → last chance
         if ttk <= window:
-            return (1, m["_priority"], ttk)       # later today
+            return (1, m["_priority"], ttk)       # after next run → next run covers it
         return (2, m["_priority"], ttk)           # far off
 
     # Exclude only finished / final-stretch props (kicked off more than grace ago).
@@ -470,6 +505,7 @@ def attach_smart_money(markets: list, min_smart_usd: float) -> list:
     type_rank = {"game_prop": 0, "player_prop": 1, "other": 2, "future": 3}
     kept.sort(
         key=lambda x: (
+            0 if x.get("last_chance") else 1,   # games before the next run lead the view
             type_rank.get(x.get("market_type"), 2),
             -x["smart_money"]["sharp_traders_present"],
             -x["smart_money"]["sharp_lean_pct"],
@@ -637,18 +673,27 @@ wins), and multiple. Apply these rules:
   - Prefer the higher-payout pick when two candidates have similar conviction.
   - Always report the pick's price and payout so the user sees the upside.
 
-TIMING — THIS RUN HAS A WINDOW. "run_context" gives the current time (now_utc)
-and this run's label. Each market has a "status" field:
-  - "upcoming" (+ mins_to_kickoff): not started yet. Prioritize the SOONEST.
-  - "live" (+ mins_since_kickoff): in progress. THESE ARE FAIR GAME as long as
-    there's meaningful time left (roughly before ~75 min played). For a live
-    game, pick in-play markets that STILL have value with time remaining — next
-    goal, total goals, a team to score, comeback/draw lines — not something
-    already effectively decided.
+TIMING — PRIORITIZE EVERY GAME THAT HAPPENS BEFORE THE NEXT RUN. Runs happen
+~3x/day; "run_context" gives now_utc, this run's label, and the NEXT run's time.
+Any game that kicks off before that next run gets NO other Moby run first — this
+run is its ONLY chance to bet it. Each market has:
+  - "last_chance": true → the game is live (with time left) OR kicks off BEFORE
+    the next scheduled run. THESE ARE THE PRIORITY — bet them now or they get no
+    Moby bet at all. If there is ONE last_chance game, focus the slate on it
+    (~2-3 solid game/player props). If there are SEVERAL last_chance games, cover
+    EACH of them — do NOT spend the whole slate on one and ignore the others,
+    since none of them get another run.
+  - "status": "upcoming" (+ mins_to_kickoff) or "live" (+ mins_since_kickoff).
+    Live games are fair game while there's meaningful time left (before ~75 min
+    played) — pick in-play markets that still hold value (next goal, total goals,
+    a team to score, comeback/draw lines), not something already decided.
   - SKIP only games in the final stretch / finished (no time for value left).
-    Don't re-recommend a game an earlier run already covered if it's now nearly
-    over — move to the next matches.
-Surface a healthy mix: the next upcoming games AND any live games with time left.
+
+LATER GAMES (last_chance=false) CAN WAIT — the NEXT run will cover them, so don't
+spend this slate on them by default. BUT never send an empty slate just because
+the last_chance games are dead: if EVERY last_chance game is decided or offers no
+value, THEN reach forward and bet the next games in the window (later today or
+next day). Only return no bets if genuinely nothing in the window has value.
 
 MATCH-LEVEL BETS ARE THE PRIORITY. Spend the slate on game props and player
 props for upcoming matches. Futures (tournament winner, etc.) are only a GLANCE:
@@ -656,9 +701,11 @@ include AT MOST 1 futures pick, and only if it's genuinely exceptional. If
 upcoming matches exist, you MUST surface the best game/player props before any
 future. Do not fill the slate with futures.
 
-Up to ~3 game props and ~3 player props, plus at most 1 future. Only where the
-factors AND the payoff support a pick; otherwise return an empty list for that
-bucket. Prefer UPCOMING games (soonest kickoff).
+SLATE SIZE scales with how many last_chance games there are: aim for ~2-3 strong
+props on EACH last_chance game (game + player props combined). ONE last_chance
+game → ~2-3 picks total (the normal run). SEVERAL → return more so each is
+covered, up to ~8 picks total. Plus at most 1 future. Only where the factors AND
+the payoff support a pick; empty buckets are fine, and never pad to hit a number.
 
 BE CONCISE. This goes to a phone. Each field is a SHORT phrase or ONE sentence —
 no paragraphs, no citations, no "<cite>" tags. smart_money ≤ 20 words. news ≤ 20
@@ -672,6 +719,19 @@ Conviction:
 
 Never invent holders, numbers, or news. Add a contrarian_note whenever the
 factors disagree (e.g. big money piled on a favorite the news cuts against).
+
+FLAG CONTRARIAN / HEDGE PICKS. Set each pick's "tag":
+  - "contrarian": you're backing the side OPPOSITE the raw big-money crowd
+    (siding with sharp money against where most dollars sit), or opposite a
+    clear news/public consensus.
+  - "hedge": the pick partly OFFSETS another pick in THIS SAME slate — it wins
+    if your other pick's scenario doesn't (e.g. an "Under 1.5 first half" next
+    to an "Over 2.5 full game"). A protective/secondary play, not standalone.
+  - "none": a standard, aligned play. This is the DEFAULT for most picks.
+  Put a short "tag_note" (<= 12 words) naming what it goes against — e.g.
+  "offsets the Over 2.5 pick" or "sharp money vs raw crowd"; else "". This is
+  SEPARATE from "contrarian_note" (that's the risk). Tag sparingly, only when
+  clearly true.
 
 Output your final answer as a single fenced JSON block and NOTHING after it, in
 exactly this schema:
@@ -691,7 +751,9 @@ exactly this schema:
         "smart_money": "<= 20 words: raw lean + sharp lean (name a notable sharp if any)>",
         "news": "<= 20 words: what recent news says. No citations.>",
         "rationale": "<= 1 sentence combining the factors>",
-        "contrarian_note": "<= 12 words on the main risk, or 'none'>"
+        "contrarian_note": "<= 12 words on the main risk, or 'none'>",
+        "tag": "none|contrarian|hedge",
+        "tag_note": "<= 12 words: if tagged, what it goes against; else ''>"
       }
     ],
     "player_props": [ /* same shape */ ],
@@ -814,6 +876,47 @@ def flatten_picks(result: dict) -> list:
     return out
 
 
+def _side_matches(a, b) -> bool:
+    """Loose match between a model's pick string and an outcome label."""
+    a = str(a or "").strip().lower()
+    b = str(b or "").strip().lower()
+    if not a or not b:
+        return False
+    return a == b or a in b or b in a
+
+
+def _opposes_raw_lean(pick_side: str, lean_side: str, outcomes) -> bool:
+    """True if the pick clearly backs a DIFFERENT outcome than the raw-money
+    lean (a contrarian-to-the-crowd play). Conservative: only fires when the
+    pick positively matches a non-lean outcome, so it can't mis-flag."""
+    if not lean_side or _side_matches(pick_side, lean_side):
+        return False
+    others = [o for o in (outcomes or []) if not _side_matches(o, lean_side)]
+    return any(_side_matches(pick_side, o) for o in others)
+
+
+def annotate_contrarian(result: dict, lean_by_market: dict) -> int:
+    """Deterministic backstop: auto-tag picks that oppose the market's RAW
+    big-money lean as 'contrarian' when the model left them untagged. Never
+    overrides a tag the model set (it also flags hedges, which code can't see).
+    Returns how many picks it tagged."""
+    picks = result.get("picks", {}) or {}
+    tagged = 0
+    for bucket in BUCKETS:
+        for p in picks.get(bucket, []) or []:
+            if str(p.get("tag", "none") or "none").strip().lower() not in ("none", ""):
+                continue  # respect the model's own tag (may be hedge/contrarian)
+            info = lean_by_market.get(p.get("market", ""))
+            if not info:
+                continue
+            if _opposes_raw_lean(p.get("pick", ""), info.get("lean_side"), info.get("outcomes")):
+                p["tag"] = "contrarian"
+                if not p.get("tag_note"):
+                    p["tag_note"] = f"backs {p.get('pick')} vs raw money on {info.get('lean_side')}"
+                tagged += 1
+    return tagged
+
+
 def log_signals(result: dict, run_at: str, cid_by_market: dict) -> None:
     """Append each pick to signals_log.jsonl, enriched with condition_id so it
     can be graded (win/loss) on future runs."""
@@ -829,6 +932,7 @@ def log_signals(result: dict, run_at: str, cid_by_market: dict) -> None:
                 "market": p.get("market", ""),
                 "smart_money_side": p.get("pick", ""),
                 "conviction": p.get("conviction", ""),
+                "tag": p.get("tag", "none"),
                 "market_type": p.get("market_type", "other"),
                 "condition_id": cid,
             }
@@ -880,6 +984,10 @@ def _fmt_list(items) -> str:
 
 
 _BUCKET_LABEL = {"game_props": "GAME PROP", "player_props": "PLAYER PROP", "futures": "FUTURE"}
+# Contrarian/hedge flags: a small badge in the card title + a "Role" line.
+# Conviction still drives the card color; these only ADD a marker.
+TAG_BADGE = {"contrarian": "🔀 CONTRARIAN", "hedge": "⚖️ HEDGE"}
+TAG_ROLE = {"contrarian": "Contrarian", "hedge": "Hedge"}
 
 
 def build_discord_payload(result: dict) -> dict:
@@ -925,17 +1033,27 @@ def build_discord_payload(result: dict) -> dict:
         price = p.get("price")
         price_str = f"{round(_to_float(price) * 100)}¢" if price not in (None, "") else "—"
         payout_str = _clean(p.get("payout"), 40)
-        # Compact: 3 inline stats + one short "why" + one short "risk".
+        tag = str(p.get("tag", "") or "").strip().lower()
+        # Compact: 3 inline stats, an optional Role line, one "why", one "risk".
         fields = [
             {"name": "Conviction", "value": conf, "inline": True},
             {"name": "Price", "value": price_str, "inline": True},
             {"name": "Payout", "value": payout_str, "inline": True},
-            {"name": "Why", "value": _clean(p.get("rationale") or p.get("smart_money"), 280), "inline": False},
         ]
+        if tag in TAG_ROLE:
+            note = _clean(p.get("tag_note"), 120)
+            role_val = TAG_ROLE[tag]
+            if note and note.lower() not in ("none", "n/a"):
+                role_val = f"{TAG_ROLE[tag]} — {note}"
+            fields.append({"name": "Role", "value": role_val[:1024], "inline": False})
+        fields.append({"name": "Why", "value": _clean(p.get("rationale") or p.get("smart_money"), 280), "inline": False})
         risk = _clean(p.get("contrarian_note"), 140)
         if risk and risk.lower() not in ("none", "n/a"):
             fields.append({"name": "Risk", "value": risk, "inline": False})
         title = f"[{_BUCKET_LABEL[p['bucket']]}] {p.get('pick')} · {price_str}"
+        badge = TAG_BADGE.get(tag, "")
+        if badge:
+            title = f"{title} · {badge}"
         embeds.append({
             "title": title[:256],
             "description": _clean(p.get("market"), 200),
@@ -1015,7 +1133,7 @@ def main() -> int:
     now_dt = datetime.now(timezone.utc)
     now = now_dt.isoformat()
     slot = run_slot_label(now_dt)
-    window_hours = float(os.environ.get("WINDOW_HOURS", "12"))
+    window_hours = float(os.environ.get("WINDOW_HOURS", "18"))
     print(f"[{now}] Moby run | slot={slot} tag={tag} model={model}")
 
     events = fetch_events(tag)
@@ -1040,12 +1158,20 @@ def main() -> int:
     print("Track record:", track_record.get("note", ""))
     print("X sentiment:", x_sentiment.get("note", ""))
 
+    next_run_label = next_scheduled_run(now_dt)[1]
     run_context = {
         "now_utc": now,
         "run_label": f"{slot} CT",
+        "next_run": f"{next_run_label} CT",
         "window_hours": window_hours,
-        "note": ("Prioritize games kicking off after now_utc, soonest first. "
-                 "Skip games already late/most-of-the-way through."),
+        "note": (f"Runs happen ~3x/day; the NEXT run is {next_run_label} CT. Games "
+                 "flagged last_chance=true are live (with time left) or kick off "
+                 "BEFORE that next run — this run is their ONLY chance for a Moby "
+                 "bet, so prioritize ALL of them: one such game -> focus it (~2-3 "
+                 "props); several -> cover EACH. Games after the next run "
+                 "(last_chance=false) can wait for it, so bet them only if the "
+                 "last_chance games are dead/decided/no-value. Only return no bets "
+                 "if nothing in the window offers value."),
     }
 
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
@@ -1060,6 +1186,20 @@ def main() -> int:
     pruned = prune_low_upside(result, max_price=max_price)
     if pruned:
         print(f"Pruned {pruned} low/zero-upside pick(s) priced >= {max_price} or <= 0.05.")
+
+    # Flag picks that go against the raw big-money crowd as 'contrarian'
+    # (backstop; the model already tags hedges + contrarians itself). Uses the
+    # holder data we already computed, so it's free.
+    lean_by_market = {
+        m["question"]: {
+            "lean_side": (m.get("smart_money") or {}).get("lean_side"),
+            "outcomes": m.get("outcomes"),
+        }
+        for m in markets
+    }
+    auto_tagged = annotate_contrarian(result, lean_by_market)
+    if auto_tagged:
+        print(f"Auto-tagged {auto_tagged} pick(s) 'contrarian' (oppose raw-money lean).")
 
     print("Summary:", result.get("summary", ""))
     print("Watchlist:", result.get("watchlist", []))

@@ -47,7 +47,8 @@ allowed: Moby won't invent a pick when the factors don't support one.
 
 ```
 Gamma API ──▶ pull live World Cup markets, classify & prioritize
-                (game props → player props → futures; upcoming games first)
+                (game props → player props → futures; games before the
+                 next scheduled run first — their only shot at a bet)
                          │
 Data API ─────▶ for each market, pull top-20 holders per outcome
    /holders                │
@@ -112,8 +113,10 @@ Set as repo secrets or edit the `env:` block in `moby.yml`:
 | Variable | Default | What it does |
 |----------|---------|--------------|
 | `MARKET_TAG` | `fifa-world-cup` | Which Polymarket tag to scan (this tag includes the live per-match markets **and** futures; the bare `world-cup` tag has only tournament-level futures) |
-| `MARKET_CAP` | `50` | Markets analyzed per run |
-| `FUTURES_SLOTS` | `6` | Slots reserved for futures vs props |
+| `MARKET_CAP` | `60` | Markets analyzed per run |
+| `FUTURES_SLOTS` | `4` | Slots reserved for futures vs props |
+| `WINDOW_HOURS` | `18` | Outer reach of a run's slate. Games before the **next scheduled run** are prioritized (last chance — their only shot); games after it are fallback only |
+| `NEXT_RUN_BUFFER_MIN` | `60` | Minutes of grace past the next run when deciding which games are "last chance." Absorbs GitHub's scheduler drift so a game right around the next run isn't missed |
 | `MIN_SMART_MONEY_USD` | `2000` | Skip markets with little big-money interest |
 | `MIN_LIQUIDITY` / `MAX_SPREAD` | `500` / `0.07` | Quality filters on markets |
 | `ANTHROPIC_MODEL` | `claude-haiku-4-5-20251001` | Swap to `claude-sonnet-4-6` for sharper analysis at higher cost |

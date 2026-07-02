@@ -35,12 +35,21 @@ jobs:
                      "build_discord_payload", "send_alert", "log_signals",
                      "flatten_picks", "load_track_record", "fetch_x_sentiment",
                      "fetch_sharp_traders", "sharp_weight", "run_slot_label",
-                     "prune_low_upside"):
+                     "prune_low_upside", "annotate_contrarian", "next_scheduled_run"):
               assert hasattr(moby, fn), f"missing function: {fn}"
 
           # 1b. Run-slot label snaps drifted run times to clean Central slots.
           from datetime import datetime, timezone
           assert moby.run_slot_label(datetime(2026, 6, 29, 22, 30, tzinfo=timezone.utc)) == "5:00 PM"
+
+          # 1b2. Next-run boundary: from 12:00 PM CT (17:00 UTC) the next run is
+          #      5:00 PM; after 5 PM CT (23:00 UTC = 6 PM CT) it's next-day 7 AM.
+          assert moby.next_scheduled_run(datetime(2026, 6, 29, 17, 0, tzinfo=timezone.utc))[1] == "5:00 PM"
+          assert moby.next_scheduled_run(datetime(2026, 6, 29, 23, 0, tzinfo=timezone.utc))[1] == "7:00 AM"
+          # The 5 PM run's boundary is the next-day 7 AM run -> a ~14h "last chance"
+          # window, so all evening/overnight games belong to it.
+          ts_5pm, _ = moby.next_scheduled_run(datetime(2026, 6, 29, 22, 0, tzinfo=timezone.utc))  # 5 PM CT
+          assert ts_5pm == datetime(2026, 6, 30, 12, 0, tzinfo=timezone.utc).timestamp()  # 7 AM CT next day
 
           # 1c. Zero/low-upside picks are pruned (a 100c lock must never ship).
           r = {"picks": {"game_props": [
@@ -107,6 +116,7 @@ jobs:
                   "pick": "Over 2.5", "conviction": "High", "kickoff": "2026-06-29T18:00:00Z",
                   "smart_money": "72% of $45k on Over", "news": "Both teams attacking form.",
                   "rationale": "Big money + news agree.", "contrarian_note": "Defensive history.",
+                  "tag": "contrarian", "tag_note": "sharp Over vs raw Under",
               }],
               "player_props": [{"market": "Messi to score", "pick": "Yes", "conviction": "Medium"}],
               "futures": [],
@@ -117,6 +127,34 @@ jobs:
           for embed in payload["embeds"]:
               for field in embed.get("fields", []):
                   assert field["value"] != "", f"empty field: {field['name']}"
+
+          # 5b. A tagged pick gets a badge in its title AND a "Role" line;
+          #     untagged picks get neither (layout otherwise unchanged).
+          tagged = next(e for e in payload["embeds"] if "CONTRARIAN" in e.get("title", ""))
+          assert any(f["name"] == "Role" for f in tagged["fields"]), tagged
+          assert "Contrarian" in next(f["value"] for f in tagged["fields"] if f["name"] == "Role")
+          plain = next(e for e in payload["embeds"] if "Messi" in e.get("description", ""))
+          assert not any(f["name"] == "Role" for f in plain["fields"]), plain
+          assert "CONTRARIAN" not in plain["title"] and "HEDGE" not in plain["title"]
+
+          # 5c. Deterministic backstop: a pick opposing the raw-money lean is
+          #     auto-tagged contrarian; an aligned pick is left alone; a tag the
+          #     model already set is never overridden.
+          rr = {"picks": {"game_props": [
+              {"market": "BTTS", "pick": "Yes", "conviction": "Medium"},                 # lean No -> flip
+              {"market": "Winner", "pick": "No", "conviction": "Low"},                    # aligned -> keep
+              {"market": "Total", "pick": "Yes", "conviction": "Low", "tag": "hedge"},    # model tag -> keep
+          ], "player_props": [], "futures": []}}
+          lean = {
+              "BTTS":   {"lean_side": "No", "outcomes": ["Yes", "No"]},
+              "Winner": {"lean_side": "No", "outcomes": ["Yes", "No"]},
+              "Total":  {"lean_side": "No", "outcomes": ["Yes", "No"]},
+          }
+          assert moby.annotate_contrarian(rr, lean) == 1
+          gp = rr["picks"]["game_props"]
+          assert gp[0]["tag"] == "contrarian", gp[0]
+          assert gp[1].get("tag", "none") in ("none", None), gp[1]
+          assert gp[2]["tag"] == "hedge", gp[2]  # model's tag preserved
 
           print("All smoke tests passed.")
           PY
