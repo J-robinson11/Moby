@@ -75,63 +75,93 @@ Two commits this day: `0ffd3de` (tags + first window model) and `a7bad03`
 
 ---
 
-## Earlier — reframe to "Moby" (exact dates not tracked)
+## 2026-06-29
+
+The **Poly → Moby reframe** and its refinements. Commits `97a5384`, `7776eb9`,
+`45ab0e4`, `c0eb003`, `bbadee3`, `8ae0656`, `a8205f2`, `e4b6969`, `52d56c2`.
 
 ### Changed / Reframed
-- **Renamed** the whole project Poly / value_scout → **Moby** (script, workflow,
-  README, log; repository renamed by the owner).
-- **Removed the mispricing engine.** Dropped the sportsbook de-vig / arbitrage
-  comparison entirely; replaced it with **multi-factor smart-money sentiment**
-  read from Polymarket holder positioning.
-- **Factor stack:** smart money (largest holders, dollar-weighted) → **sharp
-  money** (re-weighted by each holder's all-time leaderboard PnL) → web-search
-  news → self-graded track record → X/social feed (stubbed for later).
-- **Daily slate** split into **game props → player props → futures**, match-level
-  markets prioritized over tournament futures.
-- Rewrote the README around the smart-money sentiment model.
+- **Poly → Moby** (`97a5384`): replaced the sportsbook de-vig / mispricing engine
+  with a `/holders`-based smart-money read. Added `fetch_holders` +
+  `summarize_holders` (dollar-weighted lean per outcome). Renamed the script,
+  workflow, Discord username, and log file (`signals_log.jsonl`).
+- **Moby v2 — multi-factor daily slate** (`7776eb9`): picks grouped into game
+  props / player props / futures. Added a graded track record
+  (`fetch_market_resolution`, `load_track_record`), an X-sentiment stub
+  (`fetch_x_sentiment`, `X_BEARER_TOKEN`-gated), and kept web search. Picks
+  logged with `condition_id` for later grading; Discord shows a header card +
+  one card per pick.
+- **Sharp-money weighting** (`45ab0e4`): `fetch_sharp_traders` pulls the all-time
+  SPORTS+OVERALL profit leaderboard (`/v1/leaderboard`); each holder weighted by
+  lifetime PnL (`sharp_weight`). `summarize_holders` now emits
+  `sharp_lean_side`/`pct` + `notable_sharps`; markets ranked by sharp-trader
+  presence first; trust the sharp side on divergence. Full README rewrite.
+- **Match-level first + concise cards** (`8ae0656`): match markets prioritized
+  over futures; compact card layout with brevity caps.
+- **Payoff prioritization** (`bbadee3`): avoid trivial-upside favorites; surface
+  price / payout per pick.
 
 ### Added
-- All-time **profitable-trader leaderboard** ("sharp money") weighting;
-  divergence flagged when raw money and sharp money disagree.
-- **Bet/signal tracking** (`signals_log.jsonl` with `condition_id`), self-graded
-  win/loss on later runs and fed back to calibrate conviction (`load_track_record`).
-- **Always sends a Discord message**, even on a no-bets run.
-- **Color-coded Discord embeds** (conviction-based) with compact per-pick cards.
-- **Detailed job-failure Discord alert** (separate workflow step).
-- **CI smoke-test workflow** (compile + import + behavior checks on every push).
-- **Per-run Anthropic cost logging** (`estimate_cost`).
-- **Payoff focus** — price / profit-% / multiple per outcome; `prune_low_upside`
-  backstop so a 100¢ / 0%-upside "lock" never ships.
-- `run_slot_label()` — labels each run by its nearest Central slot.
+- **Slot-labeled runs, time-window prioritization, zero-upside guard**
+  (`a8205f2`): Discord header shows "X:00 run" (nearest Central slot);
+  `clean_markets` prioritizes upcoming games (soonest first) and drops games
+  kicked off >75 min ago; `run_context` + window passed to the model;
+  `prune_low_upside()` hard guard so a pick priced ≥0.90 or =1.0 never ships.
+- **CI coverage** for `run_slot_label` and `prune_low_upside` (`e4b6969`).
+- **Live games stay eligible** when not near the end (`52d56c2`) — first pass at
+  the grace window (later tuned to 105 min on 2026-07-02).
 
 ### Fixed
-- **JSON parse failure** — model exhausted its token budget on research before
-  emitting JSON. `max_tokens` 4000→8000 + an explicit "the JSON block MUST
-  appear" reminder.
-- **Expensive run (~40¢).** Default model switched Sonnet → **Haiku**.
-- **Discord empty-field crash** (HTTP 400) — added fallback values for empty
-  embed fields.
-- **Wrong Polymarket tag.** The `world-cup` tag holds only tournament futures;
-  the actual per-match markets live under **`fifa-world-cup`** — switched, and
-  refined market classification.
-- **Player props misclassified** as game props because the event title contains
-  " vs " — fixed the classification order (strong game phrases → player hints →
-  bare " vs " moneyline → futures → other).
-- **Futures dominated the slate** (money-size sort) — now sorts match-level
-  (game → player) before futures.
-- **Cards too long / `<cite>` tags** — brevity caps in the prompt + `_clean()`
-  strips citation tags and truncates.
-- **100¢ / 0%-upside "green" pick** — `prune_low_upside` + a prompt HARD RULE
-  (never surface a pick priced ≥ 0.90 or = 1.0).
-- **90th-minute game rehashed** instead of the upcoming match — introduced
-  time-window tiers so nearly-finished games drop out.
-- `commit_log` pathspec error when the log file didn't exist — existence guard.
-- GitHub Actions Node 20 deprecation warning — updated action versions.
+- **Wrong Polymarket tag** (`c0eb003`): scan `fifa-world-cup` (has the live
+  per-match markets), not `world-cup` (tournament futures only).
 
-### Infrastructure
-- Runs **3×/day on GitHub Actions**, pushing alerts to **Discord** (ntfy /
-  Twilio as alternates).
-- Cron set for US **Central** delivery (~7:20a / 12:20p / 5:20p CT), tuned early
-  and off-the-hour to absorb GitHub's scheduler drift.
+---
+
+## 2026-06-28
+
+Initial build and the **Poly-era** feature growth (commits `a7f931a` → `3d26934`).
+
+### Added
+- **Initial Polymarket Value Scout** (`a7f931a`) — the original sportsbook-vs-
+  Polymarket mispricing scanner.
+- **US Central cron** (`197ac15`); later shifted ~1h10m earlier and off-the-hour
+  (`:20`) to absorb GitHub scheduler drift (`be26667`).
+- **Always send a Discord message**, even with no bets (`c400e17`).
+- **Analytical value bets**, not just sportsbook price mismatches (`e050b14`).
+- **Discord embeds** with color coding + a bet tracking log (`18cbff7`); hardened
+  against empty field values and length limits (`939c7c7`).
+- **Job-failure Discord alert** (`4edb507`), later made detailed — repo, run #,
+  trigger, branch, commit, time, likely causes (`0932f9f`).
+- **Renamed to Poly** with richer Discord alerts — sources, near misses, stake
+  guide, scan count (`b65e46d`).
+- **CI smoke test** on every push — compile, import, JSON parse, Discord payload
+  safety (`8ae729d`).
+- **Per-run cost logging** from API usage — tokens + web searches (`afad097`).
+- **Type-based market prioritization** — game props → player props → futures, not
+  just volume (`29538fd`); upcoming games first + a small reserved futures slot +
+  game/player classification-order fix (`3d26934`).
+
+### Changed
+- **max_tokens → 8000** + a JSON reminder to stop truncated output (`f78e9aa`).
+- **Switched to Haiku** and cut web-search uses to reduce cost (`ef62a5d`).
+- **Relaxed constraints** to surface ~2-3 bets/day — 30 events, 40-market cap,
+  looser liquidity/spread, tiered-confidence prompt (`eb0c03b`); then **widened
+  coverage** to all World Cup markets incl. game props — 60 events, 60-market
+  cap, lower liquidity floor, 12 searches (`f2d6d36`).
+
+### Fixed
+- **Node 20 deprecation** — bumped `checkout@v5` / `setup-python@v6` (`23618a5`).
+- **CI referenced a removed `build_sms`** — check `send_alert` instead (`27aa039`).
+- **`commit_log` guard** — skip when no log file exists; only push on a real
+  commit (`6ed686c`).
+
+---
+
+## Infrastructure (throughout)
+
+- Runs **3×/day on GitHub Actions**, pushing alerts to **Discord** (ntfy / Twilio
+  as alternates). Cron is UTC, tuned early + off-the-hour for drift.
 - Polymarket **Gamma** (events/markets) + **Data** (holders, leaderboard) APIs —
   free, no key.
+- Scheduled runs also produce frequent `chore: log smart-money signals` commits
+  (the bot persisting `signals_log.jsonl` for later grading) — omitted here.
