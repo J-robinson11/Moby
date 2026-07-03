@@ -42,6 +42,8 @@ Optional:
   MIN_LIQUIDITY         - default 500
   MAX_SPREAD            - default 0.07
   MIN_SMART_MONEY_USD   - default 2000 (skip markets with little big-money interest)
+  KELLY_FRACTION        - default 0.25 (fraction of full Kelly for unit sizing)
+  MAX_UNITS             - default 5 (cap on suggested stake; 1 unit = 1% bankroll)
   DRY_RUN               - "1" to skip sending the alert (prints instead)
 """
 
@@ -795,6 +797,10 @@ Conviction:
             category's track record is decent.
   - Medium: a clear lean with at least one corroborating factor.
   - Low:    mild/mixed signal — list it as a speculative play, labeled Low.
+A suggested stake (in "units", ~1% of bankroll each) is computed automatically
+from your conviction + the pick's price via fractional Kelly — so be honest and
+calibrated: reserve High for genuinely strong, well-priced edges, since it sizes
+the bet up. You do NOT output the stake yourself; just set conviction and price.
 
 Never invent holders, numbers, or news. Add a contrarian_note whenever the
 factors disagree (e.g. big money piled on a favorite the news cuts against).
@@ -1002,6 +1008,60 @@ def annotate_contrarian(result: dict, lean_by_market: dict) -> int:
     return tagged
 
 
+# Suggested stake, in UNITS (1 unit = 1% of bankroll). Sizing is fractional
+# Kelly, seeded by the two things already on every pick: conviction and price.
+# Conviction sets Moby's assumed EDGE over the market price (how much more likely
+# it thinks the pick is than the ~price implies); Kelly turns that edge + the
+# pick's odds into an optimal bankroll fraction; we bet a conservative FRACTION
+# of Kelly (default 1/4) and cap it. This is deterministic (computed in code, not
+# by the model) and inherently payoff-aware: it sizes down high-variance
+# longshots and up confident value, and refuses a stake with no positive edge.
+_UNIT_EDGE = {"high": 0.05, "medium": 0.03, "low": 0.015}
+_UNIT_PCT = 1.0  # 1 unit = 1% of bankroll
+
+
+def suggest_units(conviction, price):
+    """Return a suggested stake in units (float, rounded to 0.5) or None.
+
+    Kelly: f* = p - (1-p)/b, with p = price + conviction-edge (Moby's win-prob
+    estimate) and b = (1/price) - 1 (net odds from the price). Bet KELLY_FRACTION
+    of f*, express as units (1u = 1% bankroll), floor 0.5, cap MAX_UNITS.
+    """
+    p_mkt = _to_float(price, 0.0)
+    if not (0.0 < p_mkt < 1.0):
+        return None
+    edge = _UNIT_EDGE.get(str(conviction or "").strip().lower())
+    if not edge:
+        return None
+    kelly_fraction = float(os.environ.get("KELLY_FRACTION", "0.25"))
+    max_units = float(os.environ.get("MAX_UNITS", "5"))
+    p = min(p_mkt + edge, 0.97)          # estimated true win probability
+    b = (1.0 / p_mkt) - 1.0              # net decimal odds implied by the price
+    if b <= 0:
+        return None
+    kelly = p - (1.0 - p) / b            # full-Kelly bankroll fraction
+    if kelly <= 0:
+        return None                      # no positive edge -> suggest nothing
+    units = (kelly * kelly_fraction) * 100.0 / _UNIT_PCT
+    units = min(units, max_units)
+    units = round(units * 2) / 2         # nearest 0.5
+    return units if units >= 0.5 else 0.5
+
+
+def annotate_units(result: dict) -> int:
+    """Attach a suggested stake (p['units']) to each pick, from conviction+price.
+    Returns how many picks got a stake."""
+    picks = result.get("picks", {}) or {}
+    n = 0
+    for bucket in BUCKETS:
+        for p in picks.get(bucket, []) or []:
+            u = suggest_units(p.get("conviction"), p.get("price"))
+            if u is not None:
+                p["units"] = u
+                n += 1
+    return n
+
+
 def log_signals(result: dict, run_at: str, cid_by_market: dict) -> None:
     """Append each pick to signals_log.jsonl, enriched with condition_id so it
     can be graded (win/loss) on future runs."""
@@ -1018,6 +1078,7 @@ def log_signals(result: dict, run_at: str, cid_by_market: dict) -> None:
                 "smart_money_side": p.get("pick", ""),
                 "conviction": p.get("conviction", ""),
                 "tag": p.get("tag", "none"),
+                "units": p.get("units"),
                 "market_type": p.get("market_type", "other"),
                 "condition_id": cid,
             }
@@ -1109,7 +1170,7 @@ def build_discord_payload(result: dict) -> dict:
         "title": f"🐋 Moby — {slot} run",
         "description": f"{_clean(summary, 280)}\n\n**{header_lines}**",
         "color": 0x3498DB,
-        "footer": {"text": f"Match-level first · futures = glance{scanned}{tr_note}"},
+        "footer": {"text": f"Stakes in units (1u≈1% bankroll, ¼-Kelly) · futures = glance{scanned}{tr_note}"},
     }]
 
     for p in picks:
@@ -1119,12 +1180,16 @@ def build_discord_payload(result: dict) -> dict:
         price_str = f"{round(_to_float(price) * 100)}¢" if price not in (None, "") else "—"
         payout_str = _clean(p.get("payout"), 40)
         tag = str(p.get("tag", "") or "").strip().lower()
-        # Compact: 3 inline stats, an optional Role line, one "why", one "risk".
+        # Compact: inline stats (incl. suggested stake), optional Role, why, risk.
+        units = p.get("units")
         fields = [
             {"name": "Conviction", "value": conf, "inline": True},
             {"name": "Price", "value": price_str, "inline": True},
             {"name": "Payout", "value": payout_str, "inline": True},
         ]
+        if units:
+            u_str = f"{units:g}u"  # e.g. "2.5u" / "3u"
+            fields.append({"name": "Stake", "value": u_str, "inline": True})
         if tag in TAG_ROLE:
             note = _clean(p.get("tag_note"), 120)
             role_val = TAG_ROLE[tag]
@@ -1286,6 +1351,11 @@ def main() -> int:
     auto_tagged = annotate_contrarian(result, lean_by_market)
     if auto_tagged:
         print(f"Auto-tagged {auto_tagged} pick(s) 'contrarian' (oppose raw-money lean).")
+
+    # Suggested stake per pick, in units (fractional Kelly from conviction+price).
+    staked = annotate_units(result)
+    if staked:
+        print(f"Sized {staked} pick(s) with a suggested unit stake.")
 
     print("Summary:", result.get("summary", ""))
     print("Watchlist:", result.get("watchlist", []))

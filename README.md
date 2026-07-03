@@ -122,8 +122,32 @@ Set as repo secrets or edit the `env:` block in `moby.yml`:
 | `NEXT_RUN_BUFFER_MIN` | `60` | Minutes of grace past the next run when deciding which games are "last chance." Absorbs GitHub's scheduler drift so a game right around the next run isn't missed |
 | `MIN_SMART_MONEY_USD` | `2000` | Skip markets with little big-money interest |
 | `MIN_LIQUIDITY` / `MAX_SPREAD` | `500` / `0.07` | Quality filters on markets |
+| `KELLY_FRACTION` | `0.25` | Fraction of full Kelly used to size the suggested stake. Lower = more conservative |
+| `MAX_UNITS` | `5` | Cap on the suggested stake (1 unit = 1% of bankroll) |
 | `ANTHROPIC_MODEL` | `claude-haiku-4-5-20251001` | Swap to `claude-sonnet-4-6` for sharper analysis at higher cost |
 | `X_BEARER_TOKEN` | — | Reserved for the upcoming X/Twitter sentiment feed |
+
+---
+
+## Stake sizing (units)
+
+Each pick includes a suggested **stake in units**, where **1 unit = 1% of your
+bankroll** (a bankroll-agnostic way to size bets — see any sports-betting
+"units" explainer). It's computed **mathematically, not guessed**, from two
+things already on every pick: **conviction** and **price**.
+
+- The pick's **price** is treated as the market's implied win probability, and
+  **conviction** adds a small assumed edge on top (High +5, Medium +3, Low +1.5
+  percentage points).
+- That edge + the pick's odds go through the **Kelly criterion** (`f* = p −
+  (1−p)/b`), and Moby stakes a conservative **quarter of Kelly** (`KELLY_FRACTION`),
+  floored at 0.5u and capped at `MAX_UNITS`.
+
+Because it's Kelly-based, sizing is inherently payoff-aware: it **sizes down**
+high-variance longshots, **sizes up** confident, well-priced edges, and suggests
+**nothing** when there's no positive edge. A ½-unit "lean" and a 4-unit "lock"
+carry Moby's confidence in a number you can act on — scaled to *your* bankroll,
+whatever its size. **Not financial advice; bet responsibly.**
 
 ---
 

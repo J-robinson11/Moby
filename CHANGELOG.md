@@ -41,6 +41,12 @@ Two commits this day: `0ffd3de` (tags + first window model) and `a7bad03`
   divergence** (sharp opposite raw *and* the pick follows sharp).
 
 ### Added
+- **Suggested stake in units** on every pick (1 unit = 1% of bankroll). Computed
+  in code via **fractional Kelly** seeded by the pick's conviction (assumed edge)
+  and price (odds) — `suggest_units` / `annotate_units`. Renders as a "Stake"
+  card field; logged to `signals_log.jsonl`. Payoff-aware: sizes down longshots,
+  up confident value, and suggests nothing with no positive edge. Knobs:
+  `KELLY_FRACTION` (0.25), `MAX_UNITS` (5).
 - **Hedge / contrarian tags** on picks (`tag` = none|contrarian|hedge, plus
   `tag_note`). Model-set, with a deterministic code backstop for the contrarian
   case. Rendered as a small badge in the card title + a "Role" line; conviction

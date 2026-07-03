@@ -35,7 +35,8 @@ jobs:
                      "build_discord_payload", "send_alert", "log_signals",
                      "flatten_picks", "load_track_record", "fetch_x_sentiment",
                      "fetch_sharp_traders", "sharp_weight", "run_slot_label",
-                     "prune_low_upside", "annotate_contrarian", "next_scheduled_run"):
+                     "prune_low_upside", "annotate_contrarian", "next_scheduled_run",
+                     "suggest_units", "annotate_units"):
               assert hasattr(moby, fn), f"missing function: {fn}"
 
           # 1b. Run-slot label snaps drifted run times to clean Central slots.
@@ -162,6 +163,20 @@ jobs:
           assert gp[0]["tag"] == "contrarian", gp[0]
           assert gp[1].get("tag", "none") in ("none", None), gp[1]  # longshot, not contrarian
           assert gp[2]["tag"] == "hedge", gp[2]  # model's tag preserved
+
+          # 5d. Suggested stake (units) via fractional Kelly from conviction+price:
+          #     higher conviction sizes up, no-edge picks get nothing, capped at
+          #     MAX_UNITS, and it renders as a "Stake" card field.
+          assert moby.suggest_units("High", 0.5) >= moby.suggest_units("Medium", 0.5) >= moby.suggest_units("Low", 0.5)
+          assert moby.suggest_units("Low", 1.0) is None      # priced out -> no stake
+          assert moby.suggest_units("bogus", 0.5) is None    # unknown conviction
+          assert 0 < moby.suggest_units("High", 0.85) <= 5   # capped at MAX_UNITS
+          ur = {"picks": {"game_props": [
+              {"market": "M", "pick": "Over", "conviction": "High", "price": 0.6},
+          ], "player_props": [], "futures": []}, "summary": "s"}
+          assert moby.annotate_units(ur) == 1 and ur["picks"]["game_props"][0]["units"] > 0
+          up = moby.build_discord_payload(ur)
+          assert any(f["name"] == "Stake" for e in up["embeds"] for f in e.get("fields", []))
 
           # 6. Selection / coverage regressions (the bug where upcoming games
           #    surfaced no props).
