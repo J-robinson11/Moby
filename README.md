@@ -113,8 +113,11 @@ Set as repo secrets or edit the `env:` block in `moby.yml`:
 | Variable | Default | What it does |
 |----------|---------|--------------|
 | `MARKET_TAG` | `fifa-world-cup` | Which Polymarket tag to scan (this tag includes the live per-match markets **and** futures; the bare `world-cup` tag has only tournament-level futures) |
-| `MARKET_CAP` | `60` | Markets analyzed per run |
+| `EVENT_FETCH_LIMIT` | `200` | How many events to pull from Gamma (paginated). Higher = deeper reach so **upcoming games' full prop menus** are included, not just their moneyline |
+| `MARKET_CAP` | `100` | Markets analyzed per run |
 | `FUTURES_SLOTS` | `4` | Slots reserved for futures vs props |
+| `MAX_GAME_PROPS_PER_GAME` | `30` | Cap on game props from any single match — high enough to cover a game's full standard menu, while trimming the tail (every corner/exact-score line) so one game can't crowd out the others |
+| `MAX_PLAYER_PROPS_PER_GAME` | `15` | Same cap for player props per match |
 | `WINDOW_HOURS` | `18` | Outer reach of a run's slate. Games before the **next scheduled run** are prioritized (last chance — their only shot); games after it are fallback only |
 | `NEXT_RUN_BUFFER_MIN` | `60` | Minutes of grace past the next run when deciding which games are "last chance." Absorbs GitHub's scheduler drift so a game right around the next run isn't missed |
 | `MIN_SMART_MONEY_USD` | `2000` | Skip markets with little big-money interest |

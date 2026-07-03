@@ -31,8 +31,11 @@ Twilio:
 Optional:
   ANTHROPIC_MODEL       - default "claude-haiku-4-5-20251001"
   MARKET_TAG            - default "fifa-world-cup" (incl. live match markets)
-  MARKET_CAP            - default 60 (markets analyzed per run)
+  EVENT_FETCH_LIMIT     - default 200 (events pulled from Gamma, paginated)
+  MARKET_CAP            - default 100 (markets analyzed per run)
   FUTURES_SLOTS         - default 4 (slots reserved for futures markets)
+  MAX_GAME_PROPS_PER_GAME   - default 30 (per-game cap; ~full menu, tail trimmed)
+  MAX_PLAYER_PROPS_PER_GAME - default 15 (per-game player-prop cap)
   WINDOW_HOURS          - default 18 (outer reach of a run's slate)
   NEXT_RUN_BUFFER_MIN   - default 60 (grace past the next run for "last chance")
   LIVE_GRACE_MIN        - default 105 (drop live games kicked off > this ago)
@@ -44,6 +47,7 @@ Optional:
 
 import json
 import os
+import re
 import sys
 import urllib.parse
 import urllib.request
@@ -60,19 +64,35 @@ USER_AGENT = "moby-sentiment/1.0"
 # ---------------------------------------------------------------------------
 # 1. Pull + clean Polymarket markets
 # ---------------------------------------------------------------------------
-def fetch_events(tag_slug: str, limit: int = 60) -> list:
-    """Fetch open events for a tag, highest 24h volume first, from Gamma."""
-    params = {
-        "closed": "false",
-        "limit": str(limit),
-        "order": "volume24hr",
-        "ascending": "false",
-        "tag_slug": tag_slug,
-    }
-    url = f"{GAMMA_BASE}/events?{urllib.parse.urlencode(params)}"
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+def fetch_events(tag_slug: str, limit: int = None) -> list:
+    """Fetch open events for a tag, highest 24h volume first, from Gamma.
+
+    Paginates (the API caps at ~100 events/page) so lower-volume events aren't
+    cut off. This matters a lot: an UPCOMING game's prop menu ("- More Markets",
+    "- Player Props") has far lower 24h volume than a LIVE game's, so with a
+    small limit it falls past the cutoff and the upcoming game surfaces only its
+    moneyline (a heavy favorite the payoff rule excludes) — i.e. no bettable
+    props. Pulling deeper brings every game's full prop menu into view.
+    """
+    target = int(os.environ.get("EVENT_FETCH_LIMIT", str(limit or 200)))
+    page = 100
+    out, offset = [], 0
+    while len(out) < target:
+        params = {
+            "closed": "false", "limit": str(page), "offset": str(offset),
+            "order": "volume24hr", "ascending": "false", "tag_slug": tag_slug,
+        }
+        url = f"{GAMMA_BASE}/events?{urllib.parse.urlencode(params)}"
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            batch = json.loads(resp.read().decode("utf-8"))
+        if not batch:
+            break
+        out.extend(batch)
+        if len(batch) < page:
+            break
+        offset += page
+    return out[:target]
 
 
 def _as_list(raw):
@@ -98,12 +118,25 @@ _FAR_FUTURE = 9_999_999_999.0  # sorts undated markets last among "upcoming"
 
 
 def _parse_ts(*candidates) -> float:
-    """Parse the first valid ISO8601 timestamp into epoch seconds."""
+    """Parse the first valid timestamp into epoch seconds.
+
+    Polymarket mixes formats: ISO with 'Z' and microseconds, but crucially
+    gameStartTime looks like "2026-07-03 03:00:00+00" — a space separator and a
+    short "+00" offset that datetime.fromisoformat rejects on older Pythons. If
+    that fails to parse, a real FUTURE kickoff gets missed and the market looks
+    long-finished (then the grace filter wrongly drops it). Normalize first.
+    """
     for raw in candidates:
         if not raw or not isinstance(raw, str):
             continue
+        s = raw.strip()
+        if "T" not in s and " " in s:                     # "...03 03:00:00+00" -> "...03T03:00:00+00"
+            s = s.replace(" ", "T", 1)
+        s = s.replace("Z", "+00:00")
+        s = re.sub(r"([+-]\d{2})(\d{2})$", r"\1:\2", s)   # +0000 -> +00:00
+        s = re.sub(r"([+-]\d{2})$", r"\1:00", s)          # +00   -> +00:00
         try:
-            return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+            return datetime.fromisoformat(s).timestamp()
         except ValueError:
             continue
     return _FAR_FUTURE
@@ -134,6 +167,9 @@ _FUTURE_HINTS = (
     "win group", "group winner", "to qualify", "round of 16", "round of 32",
     "golden glove", "golden ball", "furthest advancing",
 )
+# Novelty / joke markets with no real betting value — skip entirely so they
+# don't eat slots (and tokens) meant for actual game props.
+_NOVELTY = ("announcers say", "what will the announcers")
 
 
 def classify_market(question: str, event: str) -> tuple:
@@ -176,23 +212,27 @@ _SLOT_LABELS = {7: "7:00 AM", 12: "12:00 PM", 17: "5:00 PM"}
 
 
 def next_scheduled_run(now_utc: datetime = None):
-    """Return (utc_timestamp, label) of the NEXT scheduled run (Central
-    7AM/12PM/5PM).
+    """Return (utc_timestamp, label) of the run AFTER the current one — i.e. the
+    boundary of THIS run's window (Central 7AM/12PM/5PM).
 
-    Any game that kicks off before this gets no other Moby run first, so the
-    current run is its only chance to bet it. Central = UTC-5 (CDT, summer),
-    matching run_slot_label. The tz-shift trick: subtract 5h to read Central
-    wall-clock, pick the next slot, add 5h back to return the true UTC instant.
+    Keyed to the CURRENT run's slot (nearest slot, matching run_slot_label), not
+    merely "the next slot after now." That distinction matters: GitHub's cron for
+    the 5PM run fires at 16:20 CT, so "next slot after now" would pick 5PM itself
+    and shrink the window to ~40min — wrongly excluding that whole evening's
+    games. Central = UTC-5 (CDT, summer). tz-shift trick: subtract 5h to read
+    Central wall-clock, step to the next slot, add 5h back for the true UTC.
     """
     now_utc = now_utc or datetime.now(timezone.utc)
     ct = now_utc - timedelta(hours=5)
-    for h in _RUN_SLOTS_CT:
-        slot = ct.replace(hour=h, minute=0, second=0, microsecond=0)
-        if slot > ct:
-            return ((slot + timedelta(hours=5)).timestamp(), _SLOT_LABELS[h])
-    # Past the last slot today -> first slot tomorrow.
-    slot = ct.replace(hour=_RUN_SLOTS_CT[0], minute=0, second=0, microsecond=0) + timedelta(days=1)
-    return ((slot + timedelta(hours=5)).timestamp(), _SLOT_LABELS[_RUN_SLOTS_CT[0]])
+    hr = ct.hour + ct.minute / 60.0
+    current = min(_RUN_SLOTS_CT, key=lambda s: abs(s - hr))   # this run's slot
+    idx = _RUN_SLOTS_CT.index(current)
+    if idx + 1 < len(_RUN_SLOTS_CT):
+        nxt_h, day = _RUN_SLOTS_CT[idx + 1], 0
+    else:
+        nxt_h, day = _RUN_SLOTS_CT[0], 1                      # after the last slot -> next day's first
+    slot = ct.replace(hour=nxt_h, minute=0, second=0, microsecond=0) + timedelta(days=day)
+    return ((slot + timedelta(hours=5)).timestamp(), _SLOT_LABELS[nxt_h])
 
 
 def prune_low_upside(result: dict, max_price: float = 0.90, min_price: float = 0.05) -> int:
@@ -233,6 +273,14 @@ def payouts_for(outcomes: list, prices: list) -> dict:
     return out
 
 
+def _game_key(event_title: str) -> str:
+    """Collapse a single match's several events into one key so per-game caps
+    span all of them: 'Brazil vs. Japan - More Markets', '... - Player Props'
+    and '... - Exact Score' all map to 'Brazil vs. Japan'."""
+    t = str(event_title or "")
+    return t.split(" - ")[0].strip() or t
+
+
 def clean_markets(events: list, min_liquidity: float, max_spread: float) -> list:
     """Flatten events -> markets; keep liquid, tight-spread ones; prioritize."""
     cleaned = []
@@ -241,6 +289,8 @@ def clean_markets(events: list, min_liquidity: float, max_spread: float) -> list
         for m in ev.get("markets", []) or []:
             if m.get("closed") or not m.get("active", True):
                 continue
+            if any(n in (ev_title + " " + (m.get("question") or "")).lower() for n in _NOVELTY):
+                continue  # skip novelty markets ("what will the announcers say...")
             liquidity = _to_float(m.get("liquidity"))
             spread = _to_float(m.get("spread"), default=1.0)
             if liquidity < min_liquidity or spread > max_spread:
@@ -254,9 +304,12 @@ def clean_markets(events: list, min_liquidity: float, max_spread: float) -> list
                 continue  # can't fetch holders without it
             question = m.get("question", "")
             priority, label = classify_market(question, ev_title)
+            # Prefer the real kickoff; fall back to the market/event END (≈ game
+            # window). Deliberately NOT startDate — that's the market's creation
+            # date (often days before kickoff), which would make an upcoming game
+            # look long-finished and get grace-dropped.
             ts = _parse_ts(
-                m.get("gameStartTime"), m.get("startDate"),
-                ev.get("startDate"), m.get("endDate"), ev.get("endDate"),
+                m.get("gameStartTime"), m.get("endDate"), ev.get("endDate"),
             )
             cleaned.append(
                 {
@@ -276,7 +329,7 @@ def clean_markets(events: list, min_liquidity: float, max_spread: float) -> list
                 }
             )
 
-    cap = int(os.environ.get("MARKET_CAP", "60"))
+    cap = int(os.environ.get("MARKET_CAP", "100"))
     futures_slots = int(os.environ.get("FUTURES_SLOTS", "4"))
     futures_slots = max(0, min(futures_slots, cap))
 
@@ -293,6 +346,11 @@ def clean_markets(events: list, min_liquidity: float, max_spread: float) -> list
     buffer = float(os.environ.get("NEXT_RUN_BUFFER_MIN", "60")) * 60  # grace past the next run (absorbs scheduler drift)
     last_chance_until = next_scheduled_run(now_dt)[0] + buffer        # bet-now-or-never boundary
     for m in cleaned:
+        if m["_priority"] == 2:                # tournament future, not a timed match
+            m["status"] = "future"
+            m["last_chance"] = False
+            m["_ttk"] = None
+            continue
         ttk = (m["_ts"] - now_ts) if m["_ts"] != _FAR_FUTURE else None  # seconds to kickoff
         m["_ttk"] = ttk
         if ttk is None:
@@ -329,6 +387,26 @@ def clean_markets(events: list, min_liquidity: float, max_spread: float) -> list
     futures = [m for m in cleaned if m["_priority"] == 2]
     props.sort(key=prop_key)
     futures.sort(key=lambda x: (x["_ts"], -x["volume24hr"]))
+
+    # Diversity guard (generous): each game contributes up to its FULL standard
+    # menu of markets, so the model sees ~all the real bet types and picks the
+    # best — while still capping the pathological tail (a 200+ entry player-prop
+    # list, every corner/exact-score line) so one game can't crowd the others out
+    # entirely. Game and player props are capped separately per game; props is
+    # priority-sorted, so each game keeps its strongest markets first and the
+    # excess is filler used only if slots remain.
+    max_g = int(os.environ.get("MAX_GAME_PROPS_PER_GAME", "30"))
+    max_p = int(os.environ.get("MAX_PLAYER_PROPS_PER_GAME", "15"))
+    counts, primary, overflow = {}, [], []
+    for m in props:
+        c = counts.setdefault(_game_key(m.get("event", "")), [0, 0])
+        slot_i = 1 if m["_priority"] == 1 else 0          # player props vs game/other
+        if c[slot_i] < (max_p if slot_i else max_g):
+            c[slot_i] += 1
+            primary.append(m)
+        else:
+            overflow.append(m)
+    props = primary + overflow
 
     props_slots = cap - futures_slots
     selected = props[:props_slots] + futures[:futures_slots]
@@ -673,27 +751,27 @@ wins), and multiple. Apply these rules:
   - Prefer the higher-payout pick when two candidates have similar conviction.
   - Always report the pick's price and payout so the user sees the upside.
 
-TIMING — PRIORITIZE EVERY GAME THAT HAPPENS BEFORE THE NEXT RUN. Runs happen
-~3x/day; "run_context" gives now_utc, this run's label, and the NEXT run's time.
-Any game that kicks off before that next run gets NO other Moby run first — this
-run is its ONLY chance to bet it. Each market has:
+TIMING — FOCUS THIS RUN'S WINDOW; LATER GAMES ARE USUALLY SAVED FOR LATER RUNS.
+Runs happen ~3x/day; "run_context" gives now_utc, this run's label, and the NEXT
+run's time. Each run mainly "owns" the games between now and the next run. Each
+market has:
   - "last_chance": true → the game is live (with time left) OR kicks off BEFORE
-    the next scheduled run. THESE ARE THE PRIORITY — bet them now or they get no
-    Moby bet at all. If there is ONE last_chance game, focus the slate on it
-    (~2-3 solid game/player props). If there are SEVERAL last_chance games, cover
-    EACH of them — do NOT spend the whole slate on one and ignore the others,
-    since none of them get another run.
+    the next scheduled run. THESE ARE YOUR FOCUS — this run is their only chance.
+    Give each last_chance game its best bets (roughly 2-4 strong game/player
+    props each). ONE last_chance game → focus it; SEVERAL → cover each (don't
+    blow the whole slate on one and ignore the others).
+  - "last_chance": false → the game kicks off AFTER the next run, which will
+    cover it. USUALLY skip it and save it for that run. You MAY include it only
+    if it's an EXCEPTIONAL standout (strong sharp money + real payoff worth
+    grabbing early) — but don't fill the slate with later-window games.
   - "status": "upcoming" (+ mins_to_kickoff) or "live" (+ mins_since_kickoff).
-    Live games are fair game while there's meaningful time left (before ~75 min
+    Live games are fair while there's meaningful time left (before ~75 min
     played) — pick in-play markets that still hold value (next goal, total goals,
     a team to score, comeback/draw lines), not something already decided.
-  - SKIP only games in the final stretch / finished (no time for value left).
+  - SKIP games in the final stretch / finished (no value left).
 
-LATER GAMES (last_chance=false) CAN WAIT — the NEXT run will cover them, so don't
-spend this slate on them by default. BUT never send an empty slate just because
-the last_chance games are dead: if EVERY last_chance game is decided or offers no
-value, THEN reach forward and bet the next games in the window (later today or
-next day). Only return no bets if genuinely nothing in the window has value.
+Returning FEW or NO bets is fine if the window holds nothing bettable — later
+games aren't missed, they belong to a later run. Don't pad the slate.
 
 MATCH-LEVEL BETS ARE THE PRIORITY. Spend the slate on game props and player
 props for upcoming matches. Futures (tournament winner, etc.) are only a GLANCE:
@@ -701,11 +779,12 @@ include AT MOST 1 futures pick, and only if it's genuinely exceptional. If
 upcoming matches exist, you MUST surface the best game/player props before any
 future. Do not fill the slate with futures.
 
-SLATE SIZE scales with how many last_chance games there are: aim for ~2-3 strong
-props on EACH last_chance game (game + player props combined). ONE last_chance
-game → ~2-3 picks total (the normal run). SEVERAL → return more so each is
-covered, up to ~8 picks total. Plus at most 1 future. Only where the factors AND
-the payoff support a pick; empty buckets are fine, and never pad to hit a number.
+SLATE SIZE: you're given the FULL menu of markets for each game — analyze them
+all and surface only the BEST options, roughly 2-4 strong bets per last_chance
+game (game + player props combined), up to ~8 picks total (Discord limit). Focus
+on last_chance games; a later-window game may appear only if truly exceptional
+(see TIMING). Plus at most 1 future. Only where the factors AND payoff support a
+pick; empty buckets are fine, and never pad to hit a number.
 
 BE CONCISE. This goes to a phone. Each field is a SHORT phrase or ONE sentence —
 no paragraphs, no citations, no "<cite>" tags. smart_money ≤ 20 words. news ≤ 20
@@ -896,10 +975,12 @@ def _opposes_raw_lean(pick_side: str, lean_side: str, outcomes) -> bool:
 
 
 def annotate_contrarian(result: dict, lean_by_market: dict) -> int:
-    """Deterministic backstop: auto-tag picks that oppose the market's RAW
-    big-money lean as 'contrarian' when the model left them untagged. Never
-    overrides a tag the model set (it also flags hedges, which code can't see).
-    Returns how many picks it tagged."""
+    """Deterministic backstop for the contrarian tag — only a GENUINE divergence:
+    the historically-sharp money sits OPPOSITE the raw-money crowd AND the pick
+    follows the sharp side. It never fires when raw and sharp agree — e.g. a
+    longshot future where the dollars pile onto 'No' purely by base rate; backing
+    'Yes' there is a longshot, not a contrarian call. Never overrides a tag the
+    model already set. Returns how many picks it tagged."""
     picks = result.get("picks", {}) or {}
     tagged = 0
     for bucket in BUCKETS:
@@ -907,12 +988,16 @@ def annotate_contrarian(result: dict, lean_by_market: dict) -> int:
             if str(p.get("tag", "none") or "none").strip().lower() not in ("none", ""):
                 continue  # respect the model's own tag (may be hedge/contrarian)
             info = lean_by_market.get(p.get("market", ""))
-            if not info:
+            if not info or not info.get("sharp_present"):
                 continue
-            if _opposes_raw_lean(p.get("pick", ""), info.get("lean_side"), info.get("outcomes")):
+            raw, sharp = info.get("lean_side"), info.get("sharp_lean_side")
+            if not raw or not sharp or _side_matches(raw, sharp):
+                continue  # no data, or sharp agrees with the crowd -> not contrarian
+            pick = p.get("pick", "")
+            if _side_matches(pick, sharp) and _opposes_raw_lean(pick, raw, info.get("outcomes")):
                 p["tag"] = "contrarian"
                 if not p.get("tag_note"):
-                    p["tag_note"] = f"backs {p.get('pick')} vs raw money on {info.get('lean_side')}"
+                    p["tag_note"] = f"sharp money on {sharp} vs raw crowd on {raw}"
                 tagged += 1
     return tagged
 
@@ -1164,14 +1249,13 @@ def main() -> int:
         "run_label": f"{slot} CT",
         "next_run": f"{next_run_label} CT",
         "window_hours": window_hours,
-        "note": (f"Runs happen ~3x/day; the NEXT run is {next_run_label} CT. Games "
-                 "flagged last_chance=true are live (with time left) or kick off "
-                 "BEFORE that next run — this run is their ONLY chance for a Moby "
-                 "bet, so prioritize ALL of them: one such game -> focus it (~2-3 "
-                 "props); several -> cover EACH. Games after the next run "
-                 "(last_chance=false) can wait for it, so bet them only if the "
-                 "last_chance games are dead/decided/no-value. Only return no bets "
-                 "if nothing in the window offers value."),
+        "note": (f"Runs happen ~3x/day; the NEXT run is {next_run_label} CT. Focus "
+                 "on last_chance=true games (live with time left, or kicking off "
+                 "before the next run) — surface each game's best ~2-4 bets from "
+                 "its full market menu. last_chance=false games are usually saved "
+                 "for the later run that owns them; include one only if truly "
+                 "exceptional. Few or no bets is fine if this window has nothing "
+                 "bettable."),
     }
 
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
@@ -1193,6 +1277,8 @@ def main() -> int:
     lean_by_market = {
         m["question"]: {
             "lean_side": (m.get("smart_money") or {}).get("lean_side"),
+            "sharp_lean_side": (m.get("smart_money") or {}).get("sharp_lean_side"),
+            "sharp_present": (m.get("smart_money") or {}).get("sharp_traders_present", 0),
             "outcomes": m.get("outcomes"),
         }
         for m in markets
