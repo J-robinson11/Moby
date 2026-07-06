@@ -35,7 +35,7 @@ jobs:
       # so this is where signals_log.jsonl comes from at runtime.
       - name: Restore signals log from data branch
         run: |
-          if git fetch origin data 2>/dev/null && git show origin/data:signals_log.jsonl > signals_log.jsonl 2>/dev/null; then
+          if git fetch origin data 2>/dev/null && git show FETCH_HEAD:signals_log.jsonl > signals_log.jsonl 2>/dev/null; then
             echo "Restored signals_log.jsonl from data branch ($(wc -l < signals_log.jsonl) lines)."
           else
             echo "No data branch/log yet — starting with an empty track record."
