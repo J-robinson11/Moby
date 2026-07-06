@@ -74,9 +74,9 @@ Data API ─────▶ pull all-time profit leaderboard → "sharp" wallet 
 |------|---------|
 | `moby.py` | The whole agent: data pull, sharp-money weighting, sentiment synthesis, alerts |
 | `requirements.txt` | Python deps (`anthropic`, `requests`) |
-| `.github/workflows/moby.yml` | The 3×/day schedule + Discord failure alert |
+| `.github/workflows/moby.yml` | The 3×/day schedule + Discord failure alert; restores/persists the track record on the `data` branch |
 | `.github/workflows/ci.yml` | Fast smoke test on every push (compile, classify, sharp-weighting, Discord payloads) |
-| `signals_log.jsonl` | Auto-created: every pick logged with `condition_id` so it can be graded later |
+| `signals_log.jsonl` | The track record: every pick logged with `condition_id` so it can be graded later. **Lives on the dedicated `data` branch, not `main`** — the workflow restores it before each run and force-pushes the updated log back after, so automated log commits never touch `main`. Git-ignored on `main`. |
 
 ---
 
@@ -190,6 +190,11 @@ under load.
   right, **not always** — take the contrarian flag seriously and size accordingly.
 - The `/holders` and leaderboard data reflect Polymarket's **global** catalog;
   the US-regulated app can differ, so confirm in your app before betting.
-- GitHub disables scheduled workflows after ~60 days of **no repo activity** —
-  commit occasionally or trigger a manual run to keep it alive.
+- GitHub disables scheduled workflows after ~60 days of **no repo activity**.
+  Each run force-pushes the track record to the `data` branch, which counts as
+  activity — so an actively-running Moby keeps itself alive.
+- **`main` is meant to be protected** (require a PR + passing CI). Because the
+  log is persisted to the unprotected `data` branch with the default
+  `GITHUB_TOKEN`, no ruleset bypass or personal access token is needed —
+  automated commits never target `main`.
 - Moby reads sentiment; it does not guarantee outcomes. Bet responsibly.

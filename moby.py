@@ -1087,16 +1087,19 @@ def log_signals(result: dict, run_at: str, cid_by_market: dict) -> None:
 
 
 def commit_log() -> None:
-    """Commit signals_log.jsonl back to the repo so it persists across runs."""
-    repo = os.path.dirname(__file__)
-    log_path = os.path.join(repo, "signals_log.jsonl")
-    if not os.path.exists(log_path):
-        return
-    os.system(f'cd "{repo}" && git config user.email "moby@bot" && git config user.name "Moby"')
-    os.system(
-        f'cd "{repo}" && git add signals_log.jsonl '
-        f'&& (git diff --cached --quiet || (git commit -m "chore: log smart-money signals" && git push))'
-    )
+    """Persistence of signals_log.jsonl is handled by the workflow, not here.
+
+    Moby's log used to be committed straight to the default branch on every run
+    (a stream of ``chore: log smart-money signals`` commits on ``main``). That
+    conflicts with protecting ``main``, so persistence now lives in the CI
+    workflow, which restores the log from the dedicated ``data`` branch before a
+    run and force-pushes the updated log back to ``data`` after — keeping ``main``
+    free of automated log commits. This function is intentionally a no-op; the
+    run still writes ``signals_log.jsonl`` to disk via ``log_signals()``.
+    """
+    log_path = os.path.join(os.path.dirname(__file__), "signals_log.jsonl")
+    if os.path.exists(log_path):
+        print("signals_log.jsonl written; persistence handled by the workflow's data-branch step")
 
 
 # ---------------------------------------------------------------------------

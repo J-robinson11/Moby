@@ -1,0 +1,5 @@
+
+# Track record lives on the `data` branch, not main (persisted by CI).
+__pycache__/
+*.pyc
+signals_log.jsonl

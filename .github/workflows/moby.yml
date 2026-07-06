@@ -30,6 +30,18 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # Bring the running track record in from the dedicated `data` branch so
+      # grading has history. `main` no longer stores the log (it's .gitignored),
+      # so this is where signals_log.jsonl comes from at runtime.
+      - name: Restore signals log from data branch
+        run: |
+          if git fetch origin data 2>/dev/null && git show origin/data:signals_log.jsonl > signals_log.jsonl 2>/dev/null; then
+            echo "Restored signals_log.jsonl from data branch ($(wc -l < signals_log.jsonl) lines)."
+          else
+            echo "No data branch/log yet — starting with an empty track record."
+            rm -f signals_log.jsonl
+          fi
+
       - name: Run Moby
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -46,6 +58,32 @@ jobs:
           # MARKET_CAP: "40"
           # MIN_SMART_MONEY_USD: "2000"
         run: python moby.py
+
+      # Persist the updated track record to the dedicated `data` branch (NOT main).
+      # The full cumulative log lives in one file, so a single-commit force-push
+      # keeps the branch tiny. Uses the default GITHUB_TOKEN — `data` is
+      # unprotected, so no PAT or ruleset bypass is needed, leaving `main` locked.
+      - name: Persist signals log to data branch
+        if: success()
+        run: |
+          if [ ! -f signals_log.jsonl ]; then
+            echo "No signals_log.jsonl to persist."; exit 0
+          fi
+          git config user.email "moby@bot"
+          git config user.name "Moby"
+          work="$(mktemp -d)"
+          cp signals_log.jsonl "$work/signals_log.jsonl"
+          git -C "$work" init -q
+          git -C "$work" config user.email "moby@bot"
+          git -C "$work" config user.name "Moby"
+          git -C "$work" checkout -q -b data
+          git -C "$work" add signals_log.jsonl
+          git -C "$work" commit -q -m "chore: log smart-money signals"
+          git -C "$work" push -q --force \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" data
+          echo "Pushed updated log to data branch."
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Notify Discord if any step above failed, so you know to check the logs.
       - name: Notify Discord on failure

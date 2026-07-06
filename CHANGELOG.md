@@ -9,6 +9,24 @@ history is reconstructed from memory and may be approximate.
 
 ---
 
+## 2026-07-06
+
+### Changed
+- **Track record moved off `main` to a dedicated `data` branch.** Moby used to
+  commit `signals_log.jsonl` straight to the default branch on every run (a
+  stream of `chore: log smart-money signals` commits on `main`), which blocks
+  protecting `main`. Persistence now lives in the workflow: a **restore** step
+  pulls the log from the `data` branch before the run (so grading keeps its
+  history) and a **persist** step force-pushes the updated full log back to
+  `data` after. The log is a single cumulative file, so `data` stays at one
+  commit. `commit_log()` in `moby.py` is now a no-op (persistence is the
+  workflow's job); `signals_log.jsonl` is git-ignored on `main`.
+- **No token/bypass needed.** Because `data` is unprotected, the default
+  `GITHUB_TOKEN` pushes it — so `main` can be locked (require PR + CI) with no
+  ruleset bypass or PAT. Automated commits never target `main`.
+
+---
+
 ## 2026-07-02
 
 Two commits this day: `0ffd3de` (tags + first window model) and `a7bad03`
