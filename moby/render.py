@@ -50,6 +50,10 @@ def build_discord_payload(result: dict) -> dict:
     # titles, byte-for-byte, so existing soccer output never drifts.
     label = result.get("_sport_label")
     head = f"🐋 Moby · {label}" if label else "🐋 Moby"
+    # Manual TEST runs (workflow_dispatch test=1) post for real but are marked
+    # unmistakably so a validation slate is never mistaken for a live signal.
+    if result.get("_test_run"):
+        head = f"🧪 TEST · {head}"
 
     picks = flatten_picks(result)
     if not picks:

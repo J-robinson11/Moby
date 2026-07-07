@@ -111,3 +111,20 @@ def test_embed_count_capped_at_discord_limit():
     ], "player_props": [], "futures": []}, "summary": "Busy day.", "_run_slot": "5:00 PM"}
     payload = moby.build_discord_payload(many)
     assert len(payload["embeds"]) == 10  # Discord max 10 embeds (header + 9 picks)
+
+
+def test_test_run_badge_prefixes_header():
+    # workflow_dispatch test=1 → the slate posts for real but is unmistakably
+    # marked; absent flag → no badge (the golden fixtures rely on this).
+    base = _full_slate()
+    tagged = moby.build_discord_payload({**base, "_sport_label": "World Cup", "_test_run": True})
+    assert tagged["embeds"][0]["title"] == "🧪 TEST · 🐋 Moby · World Cup — 5:00 PM run"
+    plain = moby.build_discord_payload({**base, "_sport_label": "World Cup"})
+    assert "TEST" not in plain["embeds"][0]["title"]
+
+
+def test_test_run_badge_no_picks():
+    base = {"picks": {"game_props": [], "player_props": [], "futures": []},
+            "watchlist": [], "summary": "Quiet.", "_run_slot": "7:00 AM", "_test_run": True}
+    title = moby.build_discord_payload(base)["embeds"][0]["title"]
+    assert title == "🧪 TEST · 🐋 Moby — 7:00 AM run · no bets"

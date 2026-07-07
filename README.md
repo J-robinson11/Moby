@@ -187,9 +187,14 @@ sport posts to its **own** Discord channel via `DISCORD_WEBHOOK_URL_<SPORT>`
 `DISCORD_WEBHOOK_URL`.
 
 ### 3. Test it
-**Actions** tab → **Moby** → **Run workflow**. The dispatch form has a
-**`dry_run`** input — set it to `1` to print the slate to the log instead of
-posting to Discord (nothing is sent). Watch the log.
+**Actions** tab → **Moby** → **Run workflow**. The dispatch form has two
+inputs:
+- **`dry_run`** — set to `1` to print the slate to the log instead of posting
+  to Discord (nothing is sent).
+- **`test`** — set to `1` to post to Discord **for real** but with a
+  `🧪 TEST ·` badge on the header and **no signal logging**, so a validation
+  slate is unmistakable in the channel and never enters the track record.
+  Combine with `dry_run=1` and the dry-run wins (nothing posts).
 
 ---
 
@@ -217,7 +222,9 @@ Set as repo secrets or edit the `env:` block in `moby.yml`:
 
 | Variable | Default | What it does |
 |----------|---------|--------------|
-| `MOBY_SPORTS` | `soccer` | Comma-separated sport keys to run this cycle (e.g. `soccer,wnba`). An unknown key is a startup error |
+| `MOBY_SPORTS` | `soccer` | Comma-separated sport keys to run this cycle (the workflow sets all five: `soccer,wnba,ufc,nfl,nba`). An unknown key is a startup error |
+| `REQUIRE_GAME_WINDOW` | `1` | The season gate: a sport only proceeds when it has a live game or one starting within `WINDOW_HOURS` — futures-only sports (NFL in July) quiet-exit at $0, before the holder fetches. `0` disables |
+| `TEST_RUN` | `0` | `1` = post with the `🧪 TEST` header badge and skip signal logging (set automatically by the `test` dispatch input) |
 | `MODEL_SYNTH` | `claude-sonnet-4-6` | Stage C synthesis model. The legacy `ANTHROPIC_MODEL` secret is still honored for this if `MODEL_SYNTH` is unset |
 | `MODEL_NEWS` | `claude-haiku-4-5-20251001` | Stage B news-brief model (Haiku + web search) |
 | `BATCH_MODE` | `1` | `0` forces per-sport direct synthesis calls instead of the shared Messages Batch |

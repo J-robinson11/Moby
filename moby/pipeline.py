@@ -39,6 +39,24 @@ from moby.tracklog import log_signals
 from moby.windows import next_scheduled_run, run_slot_label
 
 
+def has_game_window(markets: list, window_hours: float) -> bool:
+    """The season gate: True only if some game/player market is LIVE or starts
+    within the window. Futures/speculation markets exist year-round (NFL win
+    totals in July, "next team" markets), so "any candidate markets" isn't
+    enough to tell an in-season sport from a dark one — a dark sport must cost
+    $0 (no holder fetches, no model call) and post nothing."""
+    window_min = window_hours * 60
+    for m in markets:
+        if m.get("market_type") not in ("game_prop", "player_prop"):
+            continue
+        if m.get("status") == "live":
+            return True
+        if (m.get("status") == "upcoming"
+                and m.get("mins_to_kickoff", float("inf")) <= window_min):
+            return True
+    return False
+
+
 def prepare_sport(client, profile) -> dict | None:
     """Everything up to (and including) the Stage-C user message for one sport.
 
@@ -66,6 +84,14 @@ def prepare_sport(client, profile) -> dict | None:
     print(f"[{profile.key}] Candidate markets: {len(markets)}")
     if not markets:
         print(f"[{profile.key}] No candidate markets this run. Exiting quietly.")
+        return None
+
+    # Season gate — before attach_smart_money, so a dark sport skips the ~100
+    # /holders calls too, not just the model. REQUIRE_GAME_WINDOW=0 disables.
+    if (knob("REQUIRE_GAME_WINDOW", "1", profile) != "0"
+            and not has_game_window(markets, window_hours)):
+        print(f"[{profile.key}] No live/upcoming games within {window_hours:.0f}h "
+              "(off-season or dark week). Exiting quietly.")
         return None
 
     markets = attach_smart_money(markets, min_smart_usd)
@@ -136,11 +162,14 @@ def finish_sport(prep: dict, result: dict) -> None:
     markets = prep["markets"]
     cid_by_market = prep["cid_by_market"]
     dry_run = os.environ.get("DRY_RUN") == "1"
+    test_run = os.environ.get("TEST_RUN") == "1"
 
     result["markets_evaluated"] = len(markets)
     result["_track_record"] = prep["track_record"]
     result["_run_slot"] = prep["slot"]
     result["_sport_label"] = profile.label
+    if test_run:
+        result["_test_run"] = True  # 🧪 TEST badge on the Discord header
 
     # Hard backstop: drop zero/low-upside picks (e.g. a 100¢ lock) the model
     # shouldn't have surfaced, regardless of how it labeled them.
@@ -177,7 +206,11 @@ def finish_sport(prep: dict, result: dict) -> None:
           f"({', '.join(b + '=' + str(sum(1 for p in picks if p['bucket'] == b)) for b in BUCKETS)})")
     print(json.dumps(result, indent=2))
 
-    log_signals(result, prep["now"], cid_by_market, sport=profile.key)
+    if test_run:
+        # A test slate must never enter the track record it would later grade.
+        print(f"[{profile.key}] TEST_RUN=1 — signals not logged.")
+    else:
+        log_signals(result, prep["now"], cid_by_market, sport=profile.key)
 
     if dry_run:
         print(f"[{profile.key}] DRY_RUN=1, would have alerted:")

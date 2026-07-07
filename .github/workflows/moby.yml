@@ -16,6 +16,10 @@ on:
         description: "Set to 1 to print the slate instead of posting to Discord"
         required: false
         default: "0"
+      test:
+        description: "Set to 1 to post with a 🧪 TEST badge and skip signal logging"
+        required: false
+        default: "0"
 
 jobs:
   moby:
@@ -58,16 +62,22 @@ jobs:
           # to wire before the WNBA channel exists.
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_WEBHOOK_URL_WNBA: ${{ secrets.DISCORD_WEBHOOK_URL_WNBA }}
+          DISCORD_WEBHOOK_URL_UFC: ${{ secrets.DISCORD_WEBHOOK_URL_UFC }}
+          DISCORD_WEBHOOK_URL_NFL: ${{ secrets.DISCORD_WEBHOOK_URL_NFL }}
+          DISCORD_WEBHOOK_URL_NBA: ${{ secrets.DISCORD_WEBHOOK_URL_NBA }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
           TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
           TWILIO_FROM: ${{ secrets.TWILIO_FROM }}
           ALERT_TO_PHONE: ${{ secrets.ALERT_TO_PHONE }}
           # --- Multi-sport / model tiers ---
-          MOBY_SPORTS: "soccer"
+          # All sports enabled; the season gate keeps dark sports at $0 (a
+          # sport only runs when it has live/upcoming games in the window).
+          MOBY_SPORTS: "soccer,wnba,ufc,nfl,nba"
           BATCH_MODE: "1"
           ANTHROPIC_MODEL: ${{ secrets.ANTHROPIC_MODEL }}   # legacy synth override, honored if set
           DRY_RUN: ${{ github.event.inputs.dry_run || '0' }}
+          TEST_RUN: ${{ github.event.inputs.test || '0' }}
           # Optional overrides (uncomment to change):
           # MODEL_SYNTH: claude-sonnet-4-6
           # MODEL_NEWS: claude-haiku-4-5-20251001

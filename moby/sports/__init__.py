@@ -3,8 +3,17 @@ import os
 
 from moby.sports.soccer import SOCCER
 from moby.sports.wnba import WNBA
+from moby.sports.ufc import UFC
+from moby.sports.nfl import NFL
+from moby.sports.nba import NBA
 
-SPORTS = {SOCCER.key: SOCCER, WNBA.key: WNBA}
+SPORTS = {
+    SOCCER.key: SOCCER,
+    WNBA.key: WNBA,
+    UFC.key: UFC,
+    NFL.key: NFL,
+    NBA.key: NBA,
+}
 
 
 def get_profiles(env: str = None) -> list:
