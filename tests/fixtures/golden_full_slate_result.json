@@ -1,0 +1,92 @@
+{
+  "generated_at": "2026-06-29T22:00:00Z",
+  "picks": {
+    "game_props": [
+      {
+        "market": "Argentina vs Brazil — total goals over 2.5",
+        "pick": "Over 2.5",
+        "conviction": "High",
+        "price": 0.55,
+        "payout": "1.82x / +82%",
+        "kickoff": "2026-06-29T18:00:00Z",
+        "smart_money": "72% of $45k raw on Over; sharp lean Over (Theo4).",
+        "news": "Both teams in attacking form.",
+        "rationale": "Big money and news agree on goals.",
+        "contrarian_note": "Defensive setups in two prior meetings.",
+        "tag": "contrarian",
+        "tag_note": "sharp Over vs raw Under",
+        "units": 2.5
+      },
+      {
+        "market": "Argentina vs Brazil — under 1.5 first-half goals",
+        "pick": "Under 1.5",
+        "conviction": "Low",
+        "price": 0.62,
+        "payout": "1.61x / +61%",
+        "kickoff": "2026-06-29T18:00:00Z",
+        "smart_money": "Raw and sharp both lean Under.",
+        "news": "Slow starts in both camps lately.",
+        "rationale": "Protects the full-game Over if goals come late.",
+        "contrarian_note": "none",
+        "tag": "hedge",
+        "tag_note": "offsets the Over 2.5 pick",
+        "units": 0.5
+      }
+    ],
+    "player_props": [
+      {
+        "market": "Messi to score anytime vs Brazil",
+        "pick": "Yes",
+        "conviction": "Medium",
+        "price": 0.38,
+        "payout": "2.63x / +163%",
+        "kickoff": "2026-06-29T18:00:00Z",
+        "smart_money": "Sharp money 65% on Yes.",
+        "news": "Fully fit, back in open training.",
+        "rationale": "Sharp lean plus fitness news at a fair price.",
+        "contrarian_note": "Rotation risk with the group already settled.",
+        "tag": "none",
+        "tag_note": "",
+        "units": 1.0
+      },
+      {
+        "market": "Mbappé 2+ shots on target vs Japan",
+        "pick": "Over",
+        "conviction": "Low",
+        "payout": "",
+        "smart_money": "Thin but sharp-side interest on Over.",
+        "news": "Expected to start after rest.",
+        "contrarian_note": "n/a",
+        "tag": "none",
+        "tag_note": ""
+      }
+    ],
+    "futures": [
+      {
+        "market": "Will France win the 2026 FIFA World Cup?",
+        "pick": "Yes",
+        "conviction": "Low",
+        "price": 0.24,
+        "payout": "4.17x / +317%",
+        "kickoff": "",
+        "smart_money": "Raw money split; sharps modestly on Yes.",
+        "news": "Squad healthy coming out of the group stage.",
+        "rationale": "<cite index=\"3-1\">Sharp accumulation has been steady across the last three sessions</cite> and the price still lags the leaderboard wallets' average entry, which suggests the proven-profitable cohort sees tournament value the raw crowd has not repriced yet; the payout multiple keeps this a small, asymmetric flyer rather than a conviction core play.",
+        "contrarian_note": "Longshot by construction; sized down accordingly.",
+        "tag": "none",
+        "tag_note": "",
+        "units": 1.0
+      }
+    ]
+  },
+  "watchlist": [
+    "USA team total — liquidity thin at posting",
+    "Japan corners — spread too wide to trust the lean"
+  ],
+  "summary": "Three plays around Argentina–Brazil plus a France flyer.",
+  "markets_evaluated": 42,
+  "_track_record": {
+    "note": "3/4 graded picks won (75%)."
+  },
+  "_run_slot": "5:00 PM"
+}
