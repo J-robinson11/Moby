@@ -23,13 +23,26 @@ Required environment variables (set as GitHub Actions secrets):
 
 Alert channel — set ONE of these (checked in this order). All are free except
 Twilio:
-  DISCORD_WEBHOOK_URL   - a Discord channel webhook URL (recommended).
+  DISCORD_WEBHOOK_URL   - a Discord channel webhook URL (recommended). Also the
+                          fallback + ops/failure channel for every sport.
+  DISCORD_WEBHOOK_URL_<SPORT> - per-sport channel webhook (e.g. _WNBA); falls
+                          back to DISCORD_WEBHOOK_URL when unset/empty.
   NTFY_TOPIC            - an ntfy.sh topic name (free, no signup).
   TWILIO_* / ALERT_TO_PHONE - real SMS via Twilio (paid).
 
 Optional:
-  ANTHROPIC_MODEL       - default "claude-haiku-4-5-20251001"
-  MARKET_TAG            - default "fifa-world-cup" (incl. live match markets)
+  MOBY_SPORTS           - default "soccer" (comma-separated sport keys,
+                          e.g. "soccer,wnba"; unknown key = startup error)
+  MODEL_SYNTH           - default "claude-sonnet-4-6" (Stage C synthesis)
+  MODEL_NEWS            - default "claude-haiku-4-5-20251001" (Stage B brief)
+  ANTHROPIC_MODEL       - legacy synthesis-model override, honored if set
+  BATCH_MODE            - default "1" (Stage C rides a Messages Batch, 50% off;
+                          "0" forces direct calls)
+  BATCH_WAIT_MIN        - default 20 (batch poll cap in minutes, then cancel +
+                          per-sport direct fallback)
+  PREFILTER_TOP_N       - default 30 (markets kept in the model view per sport)
+  NEWS_MAX_SEARCHES     - default 5 (web searches per news brief)
+  MARKET_TAG            - overrides the active sport profile's Gamma tag_slug
   EVENT_FETCH_LIMIT     - default 200 (events pulled from Gamma, paginated)
   MARKET_CAP            - default 100 (markets analyzed per run)
   FUTURES_SLOTS         - default 4 (slots reserved for futures markets)

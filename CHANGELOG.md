@@ -9,6 +9,85 @@ history is reconstructed from memory and may be approximate.
 
 ---
 
+## 2026-07-07
+
+The **multi-sport rewrite** (issue #3): the 1,387-line `moby.py` became a proper
+package with a per-sport adapter contract and a staged, batched cost engine.
+Commits `5170904`, `9cfba4b`, `707b0a3`, `40027d6` (+ a WIP checkpoint before
+it), `66cf7e1`, `63a14d0`. Shipped on `rewrite/multisport`; `main` cutover is
+the owner's own merge.
+
+### Phase 0 — real test suite
+- **CI's inline heredoc test became a real `pytest` suite** under `tests/`,
+  including a **byte-exact golden Discord-payload test**
+  (`tests/fixtures/golden_*`). Regenerate the goldens **only** for deliberate
+  format changes, via `tests/fixtures/regenerate_golden.py`.
+
+### Phase 1 — package split (no behavior change)
+- **`moby.py` split verbatim into the `moby/` package;** `moby.py` is now a
+  thin shim, so the workflow command (`python moby.py`) is unchanged. The
+  package re-exports the full public surface (`import moby; moby.clean_markets`
+  still works).
+- **`zoneinfo("America/Chicago")` replaced the hardcoded UTC-5** in the
+  slot/window math — DST-correct on its own (the old offset would have drifted
+  an hour after DST ends).
+
+### Phase 2 — the sport-adapter contract
+- **`SportProfile` adapter contract** (`moby/sports/base.py`): a new sport is one
+  profile file + one webhook secret + one registry entry, **no core edits**. The
+  soccer profile holds the original hint tuples verbatim.
+- **The prompt became a template** with per-sport slots; a test pins the
+  rendered soccer prompt string-equal to the original constant, so it can't
+  drift.
+- **Knob precedence: env > profile `defaults` > global default**
+  (`moby/config.py`).
+
+### Phase 3 — staged, batched cost engine
+- **Stage A prefilter** (code, $0): cap to `PREFILTER_TOP_N` (30) and compact
+  each market to just the fields the model reasons over.
+- **Stage B news brief:** `MODEL_NEWS` (default `claude-haiku-4-5-20251001`) +
+  web search (`NEWS_MAX_SEARCHES`, 5) — the ONLY place search happens, and only
+  when the window actually owns games.
+- **Stage C synthesis:** `MODEL_SYNTH` (default `claude-sonnet-4-6`; legacy
+  `ANTHROPIC_MODEL` still honored), **no tools**. All active sports go out as
+  **ONE Messages Batch** (50% off tokens, `custom_id` = sport key), polled up to
+  `BATCH_WAIT_MIN` (20) min, then cancel + per-sport direct fallback so an alert
+  always ships. `BATCH_MODE=0` forces direct. The shared system base block
+  carries `cache_control`.
+- **Stage D** (code, $0): prune / contrarian / units / render / send / log —
+  unchanged.
+- **Workflow:** `timeout-minutes: 35`, a `dry_run` dispatch input, and the
+  persist step guarded to `main`.
+- **Cost intent:** Sonnet-class reading on curated input for roughly what a
+  degraded Haiku run cost before (~$0.10/sport-run, ~$15–22/mo at a full
+  five-sport peak).
+
+### Phase 4 — multi-sport plumbing
+- **`MOBY_SPORTS`** selects the active sports (default `soccer`; an unknown key
+  is a **startup error**, not a silent skip).
+- **Fault-isolated `main()`:** one sport's crash can't kill its siblings; the
+  run exits 1 if any failed. A quiet exit (no markets) is **not** a failure.
+- **Per-sport Discord channels** via `DISCORD_WEBHOOK_URL_<SPORT>`, falling back
+  to the legacy `DISCORD_WEBHOOK_URL` (an empty-string secret counts as unset).
+- **`signals_log.jsonl` rows gain `sport`** (absent = soccer); the track record
+  grades per sport.
+- **Discord header is now `🐋 Moby · {label} — {slot} run`** — the one
+  deliberate user-visible change (adds the sport label; soccer with no label
+  renders byte-for-byte as before). `commit_log()` retired.
+
+### Phase 5 — WNBA reference adapter
+- **`moby/sports/wnba.py`** — the worked example a new sport is copied from,
+  validated against live Polymarket data (531 markets, 0 unclassified). Bare
+  `over`/`under` stays out of the game hints because WNBA player props read
+  `"Points O/U 21.5"`. Thinner-liquidity `defaults` (`MIN_LIQUIDITY` 250,
+  `MIN_SMART_MONEY_USD` 1000).
+
+### Testing / CI
+- **76 tests pass.** `ci.yml` now runs `pytest -q` + `py_compile` (the old
+  inline heredoc smoke test is gone).
+
+---
+
 ## 2026-07-06
 
 ### Changed
