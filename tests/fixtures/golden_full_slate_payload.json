@@ -1,0 +1,209 @@
+{
+  "embeds": [
+    {
+      "color": 3447003,
+      "description": "Three plays around Argentina\u2013Brazil plus a France flyer.\n\n**2 game props, 2 player props, 1 future**",
+      "footer": {
+        "text": "Stakes in units (1u\u22481% bankroll, \u00bc-Kelly) \u00b7 futures = glance \u00b7 42 markets \u00b7 3/4 graded picks won (75%)."
+      },
+      "title": "\ud83d\udc0b Moby \u00b7 World Cup \u2014 5:00 PM run",
+      "username": "Moby"
+    },
+    {
+      "color": 3066993,
+      "description": "Argentina vs Brazil \u2014 total goals over 2.5",
+      "fields": [
+        {
+          "inline": true,
+          "name": "Conviction",
+          "value": "High"
+        },
+        {
+          "inline": true,
+          "name": "Price",
+          "value": "55\u00a2"
+        },
+        {
+          "inline": true,
+          "name": "Payout",
+          "value": "1.82x / +82%"
+        },
+        {
+          "inline": true,
+          "name": "Stake",
+          "value": "2.5u"
+        },
+        {
+          "inline": false,
+          "name": "Role",
+          "value": "Contrarian \u2014 sharp Over vs raw Under"
+        },
+        {
+          "inline": false,
+          "name": "Why",
+          "value": "Big money and news agree on goals."
+        },
+        {
+          "inline": false,
+          "name": "Risk",
+          "value": "Defensive setups in two prior meetings."
+        }
+      ],
+      "footer": {
+        "text": "Sentiment read, not advice."
+      },
+      "title": "[GAME PROP] Over 2.5 \u00b7 55\u00a2 \u00b7 \ud83d\udd00 CONTRARIAN"
+    },
+    {
+      "color": 15105570,
+      "description": "Argentina vs Brazil \u2014 under 1.5 first-half goals",
+      "fields": [
+        {
+          "inline": true,
+          "name": "Conviction",
+          "value": "Low"
+        },
+        {
+          "inline": true,
+          "name": "Price",
+          "value": "62\u00a2"
+        },
+        {
+          "inline": true,
+          "name": "Payout",
+          "value": "1.61x / +61%"
+        },
+        {
+          "inline": true,
+          "name": "Stake",
+          "value": "0.5u"
+        },
+        {
+          "inline": false,
+          "name": "Role",
+          "value": "Hedge \u2014 offsets the Over 2.5 pick"
+        },
+        {
+          "inline": false,
+          "name": "Why",
+          "value": "Protects the full-game Over if goals come late."
+        }
+      ],
+      "footer": {
+        "text": "Sentiment read, not advice."
+      },
+      "title": "[GAME PROP] Under 1.5 \u00b7 62\u00a2 \u00b7 \u2696\ufe0f HEDGE"
+    },
+    {
+      "color": 15844367,
+      "description": "Messi to score anytime vs Brazil",
+      "fields": [
+        {
+          "inline": true,
+          "name": "Conviction",
+          "value": "Medium"
+        },
+        {
+          "inline": true,
+          "name": "Price",
+          "value": "38\u00a2"
+        },
+        {
+          "inline": true,
+          "name": "Payout",
+          "value": "2.63x / +163%"
+        },
+        {
+          "inline": true,
+          "name": "Stake",
+          "value": "1u"
+        },
+        {
+          "inline": false,
+          "name": "Why",
+          "value": "Sharp lean plus fitness news at a fair price."
+        },
+        {
+          "inline": false,
+          "name": "Risk",
+          "value": "Rotation risk with the group already settled."
+        }
+      ],
+      "footer": {
+        "text": "Sentiment read, not advice."
+      },
+      "title": "[PLAYER PROP] Yes \u00b7 38\u00a2"
+    },
+    {
+      "color": 15105570,
+      "description": "Mbapp\u00e9 2+ shots on target vs Japan",
+      "fields": [
+        {
+          "inline": true,
+          "name": "Conviction",
+          "value": "Low"
+        },
+        {
+          "inline": true,
+          "name": "Price",
+          "value": "\u2014"
+        },
+        {
+          "inline": true,
+          "name": "Payout",
+          "value": "n/a"
+        },
+        {
+          "inline": false,
+          "name": "Why",
+          "value": "Thin but sharp-side interest on Over."
+        }
+      ],
+      "footer": {
+        "text": "Sentiment read, not advice."
+      },
+      "title": "[PLAYER PROP] Over \u00b7 \u2014"
+    },
+    {
+      "color": 15105570,
+      "description": "Will France win the 2026 FIFA World Cup?",
+      "fields": [
+        {
+          "inline": true,
+          "name": "Conviction",
+          "value": "Low"
+        },
+        {
+          "inline": true,
+          "name": "Price",
+          "value": "24\u00a2"
+        },
+        {
+          "inline": true,
+          "name": "Payout",
+          "value": "4.17x / +317%"
+        },
+        {
+          "inline": true,
+          "name": "Stake",
+          "value": "1u"
+        },
+        {
+          "inline": false,
+          "name": "Why",
+          "value": "Sharp accumulation has been steady across the last three sessions and the price still lags the leaderboard wallets' average entry, which suggests the proven-profitable cohort sees tournament value the raw crowd has not repriced yet; the payout multiple keeps this a small, asymme\u2026"
+        },
+        {
+          "inline": false,
+          "name": "Risk",
+          "value": "Longshot by construction; sized down accordingly."
+        }
+      ],
+      "footer": {
+        "text": "Sentiment read, not advice."
+      },
+      "title": "[FUTURE] Yes \u00b7 24\u00a2"
+    }
+  ],
+  "username": "Moby"
+}

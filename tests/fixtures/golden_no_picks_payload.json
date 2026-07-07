@@ -1,0 +1,20 @@
+{
+  "embeds": [
+    {
+      "color": 9807270,
+      "description": "Quiet window; nothing bettable before the next run.",
+      "fields": [
+        {
+          "inline": false,
+          "name": "Watchlist",
+          "value": "\u2022 USA props \u2014 smart money too small to trust"
+        }
+      ],
+      "footer": {
+        "text": "Moby \u00b7 multi-factor sentiment \u00b7 17 markets \u00b7 Picks logged but none resolved yet \u2014 track record still building."
+      },
+      "title": "\ud83d\udc0b Moby \u00b7 World Cup \u2014 7:00 AM run \u00b7 no bets"
+    }
+  ],
+  "username": "Moby"
+}
