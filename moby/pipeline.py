@@ -9,7 +9,13 @@ from anthropic import Anthropic
 from moby.alerts import send_alert
 from moby.config import knob
 from moby.factors import fetch_x_sentiment, load_track_record
-from moby.llm import run_analysis
+from moby.llm import (
+    build_synthesis_user,
+    resolve_models,
+    run_news_brief,
+    run_synthesis,
+    wants_news_brief,
+)
 from moby.markets import clean_markets
 from moby.picks import (
     BUCKETS,
@@ -19,6 +25,7 @@ from moby.picks import (
     prune_low_upside,
 )
 from moby.polymarket import fetch_events
+from moby.prefilter import prefilter_markets
 from moby.render import build_discord_payload
 from moby.smartmoney import attach_smart_money
 from moby.sports import get_profiles
@@ -31,14 +38,15 @@ def run_sport(profile) -> int:
     min_liquidity = float(knob("MIN_LIQUIDITY", "500", profile))
     max_spread = float(knob("MAX_SPREAD", "0.07", profile))
     min_smart_usd = float(knob("MIN_SMART_MONEY_USD", "2000", profile))
-    model = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
+    model_synth, model_news = resolve_models()
     dry_run = os.environ.get("DRY_RUN") == "1"
 
     now_dt = datetime.now(timezone.utc)
     now = now_dt.isoformat()
     slot = run_slot_label(now_dt)
     window_hours = float(knob("WINDOW_HOURS", "18", profile))
-    print(f"[{now}] Moby run | sport={profile.key} slot={slot} tag={tag} model={model}")
+    print(f"[{now}] Moby run | sport={profile.key} slot={slot} tag={tag} "
+          f"synth={model_synth} news={model_news}")
 
     events = fetch_events(tag)
     markets = clean_markets(events, min_liquidity, max_spread, profile)
@@ -78,7 +86,23 @@ def run_sport(profile) -> int:
     }
 
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    result = run_analysis(client, model, markets, track_record, x_sentiment, run_context)
+
+    # Stage A ($0): curate + compact the model's view.
+    curated = prefilter_markets(markets, profile)
+    print(f"Stage A prefilter: {len(markets)} -> {len(curated)} markets in the model view")
+
+    # Stage B (Haiku + search): only when this window actually owns games.
+    if wants_news_brief(markets):
+        news_brief = run_news_brief(client, model_news, profile, curated, run_context)
+    else:
+        news_brief = {"status": "skipped",
+                      "note": "No last-chance games in this window; news search not run."}
+        print("Stage B news brief skipped: no last-chance games this window.")
+
+    # Stage C (Sonnet, batch with direct fallback): no tools, curated input.
+    user = build_synthesis_user(profile, curated, news_brief, track_record,
+                                x_sentiment, run_context)
+    result = run_synthesis(client, {profile.key: {"profile": profile, "user": user}})[profile.key]
     result["markets_evaluated"] = len(markets)
     result["_track_record"] = track_record
     result["_run_slot"] = slot

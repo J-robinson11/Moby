@@ -54,9 +54,14 @@ from moby.factors import fetch_x_sentiment, load_track_record
 from moby.llm import (
     MODEL_PRICING,
     WEB_SEARCH_COST,
+    build_synthesis_user,
     estimate_cost,
     parse_json_block,
+    resolve_models,
     run_analysis,
+    run_news_brief,
+    run_synthesis,
+    wants_news_brief,
 )
 from moby.markets import (
     _FUTURE_HINTS,
@@ -80,6 +85,7 @@ from moby.picks import (
     suggest_units,
 )
 from moby.pipeline import main, run_sport
+from moby.prefilter import compact_market, prefilter_markets
 from moby.polymarket import (
     DATA_BASE,
     GAMMA_BASE,

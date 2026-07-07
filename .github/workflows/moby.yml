@@ -10,12 +10,19 @@ name: Moby
 on:
   schedule:
     - cron: "20 11,16,21 * * *"
-  workflow_dispatch: {}   # lets you trigger a manual run from the Actions tab
+  workflow_dispatch:      # manual run from the Actions tab
+    inputs:
+      dry_run:
+        description: "Set to 1 to print the slate instead of posting to Discord"
+        required: false
+        default: "0"
 
 jobs:
   moby:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Generous budget for Batch API polling (public repo: minutes are free);
+    # a stuck batch is cancelled at BATCH_WAIT_MIN (20) + direct fallback.
+    timeout-minutes: 35
     permissions:
       contents: write
     steps:
@@ -52,8 +59,15 @@ jobs:
           TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
           TWILIO_FROM: ${{ secrets.TWILIO_FROM }}
           ALERT_TO_PHONE: ${{ secrets.ALERT_TO_PHONE }}
+          # --- Multi-sport / model tiers ---
+          MOBY_SPORTS: "soccer"
+          BATCH_MODE: "1"
+          ANTHROPIC_MODEL: ${{ secrets.ANTHROPIC_MODEL }}   # legacy synth override, honored if set
+          DRY_RUN: ${{ github.event.inputs.dry_run || '0' }}
           # Optional overrides (uncomment to change):
-          # ANTHROPIC_MODEL: claude-sonnet-4-6
+          # MODEL_SYNTH: claude-sonnet-4-6
+          # MODEL_NEWS: claude-haiku-4-5-20251001
+          # PREFILTER_TOP_N: "30"
           # MARKET_TAG: world-cup
           # MARKET_CAP: "40"
           # MIN_SMART_MONEY_USD: "2000"
@@ -63,8 +77,10 @@ jobs:
       # The full cumulative log lives in one file, so a single-commit force-push
       # keeps the branch tiny. Uses the default GITHUB_TOKEN — `data` is
       # unprotected, so no PAT or ruleset bypass is needed, leaving `main` locked.
+      # Guarded to main so branch validation runs never pollute the real
+      # track record.
       - name: Persist signals log to data branch
-        if: success()
+        if: success() && github.ref_name == 'main'
         run: |
           if [ ! -f signals_log.jsonl ]; then
             echo "No signals_log.jsonl to persist."; exit 0
