@@ -29,3 +29,18 @@ def test_next_run_from_early_cron_fire():
 def test_next_run_timestamp_is_true_utc():
     ts_5pm, _ = moby.next_scheduled_run(datetime(2026, 6, 29, 22, 0, tzinfo=timezone.utc))  # 5 PM CT
     assert ts_5pm == datetime(2026, 6, 30, 12, 0, tzinfo=timezone.utc).timestamp()  # 7 AM CT next day
+
+
+def test_run_slot_label_correct_after_dst_ends():
+    # After DST ends (Nov 1, 2026) Central = UTC-6 (CST). 15:00 UTC is 9:00 AM
+    # CST -> nearest slot 7 AM. The old hardcoded UTC-5 read it as 10:00 AM and
+    # mislabeled the run "12:00 PM".
+    assert moby.run_slot_label(datetime(2026, 11, 15, 15, 0, tzinfo=timezone.utc)) == "7:00 AM"
+
+
+def test_next_run_timestamp_correct_after_dst_ends():
+    # 23:00 UTC = 5:00 PM CST -> next run is next-day 7 AM CST = 13:00 UTC.
+    # The old UTC-5 math returned 12:00 UTC, an hour early.
+    ts, label = moby.next_scheduled_run(datetime(2026, 11, 15, 23, 0, tzinfo=timezone.utc))
+    assert label == "7:00 AM"
+    assert ts == datetime(2026, 11, 16, 13, 0, tzinfo=timezone.utc).timestamp()
