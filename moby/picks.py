@@ -85,6 +85,53 @@ def annotate_contrarian(result: dict, lean_by_market: dict) -> int:
     return tagged
 
 
+_CONV_RANK = {"high": 0, "medium": 1, "low": 2}
+
+
+def enforce_tag_budget(result: dict) -> int:
+    """Hard backstop for tag discipline: at most ONE 'hedge' and ONE
+    'contrarian' pick per slate, and a 'hedge' must actually oppose — a pick
+    that wins TOGETHER with another pick (same side, e.g. the same team at an
+    adjacent spread) is stacked exposure wearing a hedge label, and there's
+    nothing to offset in a one-pick slate. Surplus/invalid tagged picks are
+    DROPPED, not untagged: untagging a contrarian would ship a crowd-fade
+    without its warning badge, and a surplus hedge was never a standalone
+    bet. Within a tag, the highest-conviction pick survives. Runs AFTER
+    annotate_contrarian so the backstop's own tags are budgeted too.
+    Returns how many picks were dropped."""
+    picks = result.get("picks", {}) or {}
+    flat = [(b, p) for b in BUCKETS for p in (picks.get(b) or [])]
+
+    def tag_of(p):
+        return str(p.get("tag", "none") or "none").strip().lower()
+
+    def conv_rank(p):
+        return _CONV_RANK.get(str(p.get("conviction", "") or "").strip().lower(), 3)
+
+    doomed = []
+    hedges = [(b, p) for b, p in flat if tag_of(p) == "hedge"]
+    all_picks = [p for _, p in flat]
+    # A hedge that shares its side with any other pick offsets nothing.
+    real_hedges = []
+    for b, p in hedges:
+        others = [o for o in all_picks if o is not p]
+        if not others or any(_side_matches(p.get("pick"), o.get("pick")) for o in others):
+            doomed.append(p)
+        else:
+            real_hedges.append((b, p))
+    for group in (real_hedges,
+                  [(b, p) for b, p in flat if tag_of(p) == "contrarian"]):
+        if len(group) > 1:
+            group.sort(key=lambda bp: conv_rank(bp[1]))
+            doomed.extend(p for _, p in group[1:])
+
+    if doomed:
+        for b in BUCKETS:
+            picks[b] = [p for p in (picks.get(b) or []) if not any(p is d for d in doomed)]
+        result["picks"] = picks
+    return len(doomed)
+
+
 # Suggested stake, in UNITS (1 unit = 1% of bankroll). Sizing is fractional
 # Kelly, seeded by the two things already on every pick: conviction and price.
 # Conviction sets Moby's assumed EDGE over the market price (how much more likely

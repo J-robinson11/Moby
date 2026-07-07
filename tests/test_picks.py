@@ -64,3 +64,51 @@ def test_annotate_units_attaches_stake():
     # ...and it renders as a "Stake" card field.
     up = moby.build_discord_payload({**ur, "_run_slot": "5:00 PM"})
     assert any(f["name"] == "Stake" for e in up["embeds"] for f in e.get("fields", []))
+
+
+def test_tag_budget_drops_same_side_hedge():
+    # The mislabeled-hedge case from the 2026-07-07 test run: a "hedge" on the
+    # SAME side as another pick (one team at two adjacent spreads) wins
+    # together with it — that's stacked exposure, so the backstop drops it.
+    r = {"picks": {"game_props": [
+        {"market": "Spread: NY (-5.5)", "pick": "Dallas Wings", "conviction": "High"},
+        {"market": "Spread: NY (-4.5)", "pick": "Dallas Wings", "conviction": "Medium", "tag": "hedge"},
+    ], "player_props": [], "futures": []}}
+    assert moby.enforce_tag_budget(r) == 1
+    assert [p["market"] for p in r["picks"]["game_props"]] == ["Spread: NY (-5.5)"]
+
+
+def test_tag_budget_caps_one_contrarian_keeps_strongest():
+    # Two contrarians -> only the higher-conviction one survives; a single
+    # genuinely-opposing hedge is within budget and untouched.
+    r = {"picks": {"game_props": [
+        {"market": "A", "pick": "Under 2.5", "conviction": "Low", "tag": "contrarian"},
+        {"market": "B", "pick": "Over 3.5", "conviction": "High", "tag": "contrarian"},
+        {"market": "C", "pick": "Team X", "conviction": "Medium"},
+        {"market": "D", "pick": "Under 1.5 first half", "conviction": "Medium", "tag": "hedge"},
+    ], "player_props": [], "futures": []}}
+    assert moby.enforce_tag_budget(r) == 1
+    kept = r["picks"]["game_props"]
+    tags = [p.get("tag") for p in kept]
+    assert tags.count("contrarian") == 1 and tags.count("hedge") == 1
+    assert next(p for p in kept if p.get("tag") == "contrarian")["conviction"] == "High"
+
+
+def test_tag_budget_hedge_needs_something_to_offset():
+    # A one-pick slate can't contain a hedge — there is nothing to offset.
+    r = {"picks": {"game_props": [
+        {"market": "A", "pick": "Under 2.5", "conviction": "High", "tag": "hedge"},
+    ], "player_props": [], "futures": []}}
+    assert moby.enforce_tag_budget(r) == 1
+    assert r["picks"]["game_props"] == []
+
+
+def test_tag_budget_leaves_disciplined_slates_alone():
+    # One opposing hedge + one contrarian + untagged picks = within budget.
+    r = {"picks": {"game_props": [
+        {"market": "A", "pick": "Team X", "conviction": "High"},
+        {"market": "B", "pick": "Under 2.5", "conviction": "Medium", "tag": "hedge"},
+        {"market": "C", "pick": "Team Y", "conviction": "Medium", "tag": "contrarian"},
+    ], "player_props": [], "futures": []}}
+    assert moby.enforce_tag_budget(r) == 0
+    assert len(r["picks"]["game_props"]) == 3

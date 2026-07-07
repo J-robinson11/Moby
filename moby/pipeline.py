@@ -27,6 +27,7 @@ from moby.picks import (
     BUCKETS,
     annotate_contrarian,
     annotate_units,
+    enforce_tag_budget,
     flatten_picks,
     prune_low_upside,
 )
@@ -193,6 +194,12 @@ def finish_sport(prep: dict, result: dict) -> None:
     auto_tagged = annotate_contrarian(result, lean_by_market)
     if auto_tagged:
         print(f"[{profile.key}] Auto-tagged {auto_tagged} pick(s) 'contrarian' (oppose raw-money lean).")
+
+    # Tag budget: max ONE hedge + ONE contrarian per slate, and a hedge must
+    # genuinely oppose another pick — surplus/mislabeled ones are dropped.
+    tag_dropped = enforce_tag_budget(result)
+    if tag_dropped:
+        print(f"[{profile.key}] Tag budget: dropped {tag_dropped} surplus/invalid hedge-or-contrarian pick(s).")
 
     # Suggested stake per pick, in units (fractional Kelly from conviction+price).
     staked = annotate_units(result)

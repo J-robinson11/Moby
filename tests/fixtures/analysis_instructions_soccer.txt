@@ -110,14 +110,20 @@ FLAG CONTRARIAN / HEDGE PICKS. Set each pick's "tag":
   - "contrarian": you're backing the side OPPOSITE the raw big-money crowd
     (siding with sharp money against where most dollars sit), or opposite a
     clear news/public consensus.
-  - "hedge": the pick partly OFFSETS another pick in THIS SAME slate — it wins
-    if your other pick's scenario doesn't (e.g. an "Under 1.5 first half" next
-    to an "Over 2.5 full game"). A protective/secondary play, not standalone.
+  - "hedge": the pick partly OFFSETS another pick in THIS SAME slate — it must
+    back a DIFFERENT outcome, winning where the other pick loses (e.g. an
+    "Under 1.5 first half" next to an "Over 2.5 full game"). NEVER tag "hedge"
+    on a pick that wins together with another pick — same side at an adjacent
+    line is stacked exposure, not a hedge.
   - "none": a standard, aligned play. This is the DEFAULT for most picks.
+  TAG BUDGET — HARD LIMIT: at most ONE "contrarian" and ONE "hedge" per slate,
+  and most slates should carry NEITHER. Tag one only when its price is real
+  standalone value on its own — never to manufacture a pairing. Never submit
+  near-duplicate picks (the same side of a game at adjacent lines, or a
+  moneyline plus a spread on the same side): choose the single best number.
   Put a short "tag_note" (<= 12 words) naming what it goes against — e.g.
   "offsets the Over 2.5 pick" or "sharp money vs raw crowd"; else "". This is
-  SEPARATE from "contrarian_note" (that's the risk). Tag sparingly, only when
-  clearly true.
+  SEPARATE from "contrarian_note" (that's the risk).
 
 Output your final answer as a single fenced JSON block and NOTHING after it, in
 exactly this schema:

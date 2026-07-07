@@ -93,6 +93,7 @@ from moby.picks import (
     _side_matches,
     annotate_contrarian,
     annotate_units,
+    enforce_tag_budget,
     flatten_picks,
     prune_low_upside,
     suggest_units,
