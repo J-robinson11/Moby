@@ -79,7 +79,7 @@ from moby.picks import (
     prune_low_upside,
     suggest_units,
 )
-from moby.pipeline import main
+from moby.pipeline import main, run_sport
 from moby.polymarket import (
     DATA_BASE,
     GAMMA_BASE,
@@ -93,7 +93,7 @@ from moby.polymarket import (
     fetch_market_resolution,
     fetch_sharp_traders,
 )
-from moby.prompts import ANALYSIS_INSTRUCTIONS
+from moby.prompts import ANALYSIS_INSTRUCTIONS, render_instructions
 from moby.render import (
     CONF_COLOR,
     TAG_BADGE,
@@ -104,5 +104,7 @@ from moby.render import (
     build_discord_payload,
 )
 from moby.smartmoney import attach_smart_money, sharp_weight, summarize_holders
+from moby.sports import SPORTS, get_profiles
+from moby.sports.base import SportProfile
 from moby.tracklog import commit_log, log_signals
 from moby.windows import next_scheduled_run, run_slot_label

@@ -1,4 +1,5 @@
-"""Run orchestration — the end-to-end pipeline main() executes each run."""
+"""Run orchestration — run_sport(profile) is the end-to-end per-sport pipeline;
+main() runs it for every active sport in the registry."""
 import json
 import os
 from datetime import datetime, timezone
@@ -6,6 +7,7 @@ from datetime import datetime, timezone
 from anthropic import Anthropic
 
 from moby.alerts import send_alert
+from moby.config import knob
 from moby.factors import fetch_x_sentiment, load_track_record
 from moby.llm import run_analysis
 from moby.markets import clean_markets
@@ -19,26 +21,27 @@ from moby.picks import (
 from moby.polymarket import fetch_events
 from moby.render import build_discord_payload
 from moby.smartmoney import attach_smart_money
+from moby.sports import get_profiles
 from moby.tracklog import commit_log, log_signals
 from moby.windows import next_scheduled_run, run_slot_label
 
 
-def main() -> int:
-    tag = os.environ.get("MARKET_TAG", "fifa-world-cup")
-    min_liquidity = float(os.environ.get("MIN_LIQUIDITY", "500"))
-    max_spread = float(os.environ.get("MAX_SPREAD", "0.07"))
-    min_smart_usd = float(os.environ.get("MIN_SMART_MONEY_USD", "2000"))
+def run_sport(profile) -> int:
+    tag = os.environ.get("MARKET_TAG") or profile.market_tag
+    min_liquidity = float(knob("MIN_LIQUIDITY", "500", profile))
+    max_spread = float(knob("MAX_SPREAD", "0.07", profile))
+    min_smart_usd = float(knob("MIN_SMART_MONEY_USD", "2000", profile))
     model = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
     dry_run = os.environ.get("DRY_RUN") == "1"
 
     now_dt = datetime.now(timezone.utc)
     now = now_dt.isoformat()
     slot = run_slot_label(now_dt)
-    window_hours = float(os.environ.get("WINDOW_HOURS", "18"))
-    print(f"[{now}] Moby run | slot={slot} tag={tag} model={model}")
+    window_hours = float(knob("WINDOW_HOURS", "18", profile))
+    print(f"[{now}] Moby run | sport={profile.key} slot={slot} tag={tag} model={model}")
 
     events = fetch_events(tag)
-    markets = clean_markets(events, min_liquidity, max_spread)
+    markets = clean_markets(events, min_liquidity, max_spread, profile)
     print(f"Candidate markets: {len(markets)}")
     if not markets:
         print("No candidate markets this run. Exiting quietly.")
@@ -124,3 +127,16 @@ def main() -> int:
     else:
         send_alert(result)
     return 0
+
+
+def main() -> int:
+    """Run every active sport (MOBY_SPORTS, default 'soccer').
+
+    Phase 4 turns this into the fault-isolated multi-sport loop with one
+    shared synthesis batch; until then the registry holds only soccer, so
+    behavior is identical to the single-sport script.
+    """
+    rc = 0
+    for profile in get_profiles():
+        rc = max(rc, run_sport(profile))
+    return rc
