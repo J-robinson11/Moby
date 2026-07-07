@@ -112,5 +112,5 @@ from moby.render import (
 from moby.smartmoney import attach_smart_money, sharp_weight, summarize_holders
 from moby.sports import SPORTS, get_profiles
 from moby.sports.base import SportProfile
-from moby.tracklog import commit_log, log_signals
+from moby.tracklog import log_signals
 from moby.windows import next_scheduled_run, run_slot_label

@@ -53,7 +53,11 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # --- Alert channel: set ONE. Discord (free) is the default. ---
+          # Per-sport webhooks fall back to legacy DISCORD_WEBHOOK_URL when the
+          # secret is unset (empty string counts as unset), so this is harmless
+          # to wire before the WNBA channel exists.
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_WEBHOOK_URL_WNBA: ${{ secrets.DISCORD_WEBHOOK_URL_WNBA }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
           TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}

@@ -7,11 +7,30 @@ from moby.picks import flatten_picks
 from moby.render import _BUCKET_LABEL, build_discord_payload
 
 
-def send_alert(result: dict) -> None:
+def _discord_webhook(profile) -> str:
+    """Resolve the Discord webhook for this run.
+
+    Multi-sport: each sport has its own channel via ``profile.webhook_env``.
+    GitHub Actions sets an EMPTY STRING (not "unset") for a missing secret, so
+    an empty value must fall back to the legacy DISCORD_WEBHOOK_URL just like an
+    absent one — that legacy channel doubles as the ops/failure channel and is
+    always configured. profile None keeps the pre-multi-sport behavior.
+    """
+    if profile is None:
+        return os.environ.get("DISCORD_WEBHOOK_URL", "")
+    url = os.environ.get(profile.webhook_env)
+    if not url:  # missing OR empty string
+        print(f"[{profile.key}] {profile.webhook_env} unset; using legacy DISCORD_WEBHOOK_URL.")
+        return os.environ.get("DISCORD_WEBHOOK_URL", "")
+    return url
+
+
+def send_alert(result: dict, profile=None) -> None:
     """Send the alert via whichever channel is configured (free options first)."""
-    if os.environ.get("DISCORD_WEBHOOK_URL"):
+    webhook = _discord_webhook(profile)
+    if webhook:
         payload = build_discord_payload(result)
-        r = requests.post(os.environ["DISCORD_WEBHOOK_URL"], json=payload, timeout=30)
+        r = requests.post(webhook, json=payload, timeout=30)
         r.raise_for_status()
         print("Alert sent via Discord webhook.")
         return

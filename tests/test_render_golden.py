@@ -85,6 +85,25 @@ def test_tagged_pick_gets_badge_and_role_line():
     assert "CONTRARIAN" not in plain["title"] and "HEDGE" not in plain["title"]
 
 
+def test_sport_label_prefixes_header_full_slate():
+    # With _sport_label the header gains the "· {label}" prefix; without it the
+    # original single-sport title stands, byte-for-byte.
+    base = _full_slate()
+    plain = moby.build_discord_payload(base)["embeds"][0]["title"]
+    assert plain == "🐋 Moby — 5:00 PM run"
+    labeled = moby.build_discord_payload({**base, "_sport_label": "WNBA"})["embeds"][0]["title"]
+    assert labeled == "🐋 Moby · WNBA — 5:00 PM run"
+
+
+def test_sport_label_prefixes_header_no_picks():
+    base = {"picks": {"game_props": [], "player_props": [], "futures": []},
+            "watchlist": ["USA props"], "summary": "Quiet.", "_run_slot": "7:00 AM"}
+    plain = moby.build_discord_payload(base)["embeds"][0]["title"]
+    assert plain == "🐋 Moby — 7:00 AM run · no bets"
+    labeled = moby.build_discord_payload({**base, "_sport_label": "WNBA"})["embeds"][0]["title"]
+    assert labeled == "🐋 Moby · WNBA — 7:00 AM run · no bets"
+
+
 def test_embed_count_capped_at_discord_limit():
     many = {"picks": {"game_props": [
         {"market": f"Game {i} total goals", "pick": "Over", "conviction": "Low", "price": 0.5}

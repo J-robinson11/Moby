@@ -1,5 +1,11 @@
-"""Run orchestration — run_sport(profile) is the end-to-end per-sport pipeline;
-main() runs it for every active sport in the registry."""
+"""Run orchestration — the fault-isolated multi-sport flow.
+
+Each sport is prepared independently (prepare_sport), every prepared sport
+rides ONE shared synthesis batch (run_synthesis), then each is finished and
+alerted independently (finish_sport). A single sport's exception is isolated so
+it can't kill its siblings; main() returns non-zero if ANY sport failed.
+run_sport(profile) stays as a thin single-sport wrapper for the legacy surface.
+"""
 import json
 import os
 from datetime import datetime, timezone
@@ -29,17 +35,24 @@ from moby.prefilter import prefilter_markets
 from moby.render import build_discord_payload
 from moby.smartmoney import attach_smart_money
 from moby.sports import get_profiles
-from moby.tracklog import commit_log, log_signals
+from moby.tracklog import log_signals
 from moby.windows import next_scheduled_run, run_slot_label
 
 
-def run_sport(profile) -> int:
+def prepare_sport(client, profile) -> dict | None:
+    """Everything up to (and including) the Stage-C user message for one sport.
+
+    Runs the $0/cheap stages — fetch, clean, smart-money attach, factors, Stage
+    A prefilter, Stage B news brief — and returns the prep dict finish_sport
+    needs. Returns None on a quiet exit (no candidate markets, or none clear the
+    smart-money threshold) — a quiet exit is NOT a failure. The expensive Stage
+    C synthesis is deliberately left out so every sport can share ONE batch.
+    """
     tag = os.environ.get("MARKET_TAG") or profile.market_tag
     min_liquidity = float(knob("MIN_LIQUIDITY", "500", profile))
     max_spread = float(knob("MAX_SPREAD", "0.07", profile))
     min_smart_usd = float(knob("MIN_SMART_MONEY_USD", "2000", profile))
     model_synth, model_news = resolve_models()
-    dry_run = os.environ.get("DRY_RUN") == "1"
 
     now_dt = datetime.now(timezone.utc)
     now = now_dt.isoformat()
@@ -50,25 +63,25 @@ def run_sport(profile) -> int:
 
     events = fetch_events(tag)
     markets = clean_markets(events, min_liquidity, max_spread, profile)
-    print(f"Candidate markets: {len(markets)}")
+    print(f"[{profile.key}] Candidate markets: {len(markets)}")
     if not markets:
-        print("No candidate markets this run. Exiting quietly.")
-        return 0
+        print(f"[{profile.key}] No candidate markets this run. Exiting quietly.")
+        return None
 
     markets = attach_smart_money(markets, min_smart_usd)
-    print(f"Markets with smart-money interest (>= ${min_smart_usd:.0f}): {len(markets)}")
+    print(f"[{profile.key}] Markets with smart-money interest (>= ${min_smart_usd:.0f}): {len(markets)}")
     if not markets:
-        print("No markets cleared the smart-money threshold. Exiting quietly.")
-        return 0
+        print(f"[{profile.key}] No markets cleared the smart-money threshold. Exiting quietly.")
+        return None
 
     # Build market -> condition_id map for logging/grading before the model view.
     cid_by_market = {m["question"]: m.get("condition_id", "") for m in markets}
 
-    # Extra sentiment factors.
-    track_record = load_track_record()
+    # Extra sentiment factors — track record scoped to THIS sport's rows.
+    track_record = load_track_record(sport=profile.key)
     x_sentiment = fetch_x_sentiment(markets)
-    print("Track record:", track_record.get("note", ""))
-    print("X sentiment:", x_sentiment.get("note", ""))
+    print(f"[{profile.key}] Track record:", track_record.get("note", ""))
+    print(f"[{profile.key}] X sentiment:", x_sentiment.get("note", ""))
 
     next_run_label = next_scheduled_run(now_dt)[1]
     run_context = {
@@ -85,11 +98,9 @@ def run_sport(profile) -> int:
                  "bettable."),
     }
 
-    client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-
     # Stage A ($0): curate + compact the model's view.
     curated = prefilter_markets(markets, profile)
-    print(f"Stage A prefilter: {len(markets)} -> {len(curated)} markets in the model view")
+    print(f"[{profile.key}] Stage A prefilter: {len(markets)} -> {len(curated)} markets in the model view")
 
     # Stage B (Haiku + search): only when this window actually owns games.
     if wants_news_brief(markets):
@@ -97,22 +108,46 @@ def run_sport(profile) -> int:
     else:
         news_brief = {"status": "skipped",
                       "note": "No last-chance games in this window; news search not run."}
-        print("Stage B news brief skipped: no last-chance games this window.")
+        print(f"[{profile.key}] Stage B news brief skipped: no last-chance games this window.")
 
-    # Stage C (Sonnet, batch with direct fallback): no tools, curated input.
+    # Stage C user message — the batch consumes this; synthesis runs in main().
     user = build_synthesis_user(profile, curated, news_brief, track_record,
                                 x_sentiment, run_context)
-    result = run_synthesis(client, {profile.key: {"profile": profile, "user": user}})[profile.key]
+    return {
+        "profile": profile,
+        "user": user,
+        "markets": markets,
+        "cid_by_market": cid_by_market,
+        "track_record": track_record,
+        "slot": slot,
+        "now": now,
+    }
+
+
+def finish_sport(prep: dict, result: dict) -> None:
+    """Stage D for one sport: annotate the synthesis result, log it, alert it.
+
+    Takes the prep dict from prepare_sport and this sport's parsed synthesis
+    result; mutates result with the render/log metadata (incl. the new
+    _sport_label for the multi-sport Discord header), prunes/tags/sizes picks,
+    logs the signals under this sport, and sends the alert to the sport's
+    channel (or prints under DRY_RUN)."""
+    profile = prep["profile"]
+    markets = prep["markets"]
+    cid_by_market = prep["cid_by_market"]
+    dry_run = os.environ.get("DRY_RUN") == "1"
+
     result["markets_evaluated"] = len(markets)
-    result["_track_record"] = track_record
-    result["_run_slot"] = slot
+    result["_track_record"] = prep["track_record"]
+    result["_run_slot"] = prep["slot"]
+    result["_sport_label"] = profile.label
 
     # Hard backstop: drop zero/low-upside picks (e.g. a 100¢ lock) the model
     # shouldn't have surfaced, regardless of how it labeled them.
     max_price = float(os.environ.get("MAX_PICK_PRICE", "0.90"))
     pruned = prune_low_upside(result, max_price=max_price)
     if pruned:
-        print(f"Pruned {pruned} low/zero-upside pick(s) priced >= {max_price} or <= 0.05.")
+        print(f"[{profile.key}] Pruned {pruned} low/zero-upside pick(s) priced >= {max_price} or <= 0.05.")
 
     # Flag picks that go against the raw big-money crowd as 'contrarian'
     # (backstop; the model already tags hedges + contrarians itself). Uses the
@@ -128,39 +163,77 @@ def run_sport(profile) -> int:
     }
     auto_tagged = annotate_contrarian(result, lean_by_market)
     if auto_tagged:
-        print(f"Auto-tagged {auto_tagged} pick(s) 'contrarian' (oppose raw-money lean).")
+        print(f"[{profile.key}] Auto-tagged {auto_tagged} pick(s) 'contrarian' (oppose raw-money lean).")
 
     # Suggested stake per pick, in units (fractional Kelly from conviction+price).
     staked = annotate_units(result)
     if staked:
-        print(f"Sized {staked} pick(s) with a suggested unit stake.")
+        print(f"[{profile.key}] Sized {staked} pick(s) with a suggested unit stake.")
 
-    print("Summary:", result.get("summary", ""))
-    print("Watchlist:", result.get("watchlist", []))
+    print(f"[{profile.key}] Summary:", result.get("summary", ""))
+    print(f"[{profile.key}] Watchlist:", result.get("watchlist", []))
     picks = flatten_picks(result)
-    print(f"Picks: {len(picks)} "
+    print(f"[{profile.key}] Picks: {len(picks)} "
           f"({', '.join(b + '=' + str(sum(1 for p in picks if p['bucket'] == b)) for b in BUCKETS)})")
     print(json.dumps(result, indent=2))
 
-    log_signals(result, now, cid_by_market)
-    commit_log()
+    log_signals(result, prep["now"], cid_by_market, sport=profile.key)
 
     if dry_run:
-        print("DRY_RUN=1, would have alerted:")
+        print(f"[{profile.key}] DRY_RUN=1, would have alerted:")
         print(json.dumps(build_discord_payload(result), indent=2))
     else:
-        send_alert(result)
+        send_alert(result, profile)
+
+
+def run_sport(profile) -> int:
+    """Single-sport end-to-end (legacy surface). prepare → synthesis → finish;
+    a quiet prepare (None) exits 0."""
+    client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    prep = prepare_sport(client, profile)
+    if prep is None:
+        return 0
+    jobs = {profile.key: {"profile": profile, "user": prep["user"]}}
+    result = run_synthesis(client, jobs)[profile.key]
+    finish_sport(prep, result)
     return 0
 
 
 def main() -> int:
-    """Run every active sport (MOBY_SPORTS, default 'soccer').
+    """Run every active sport (MOBY_SPORTS, default 'soccer') with fault
+    isolation and ONE shared synthesis batch.
 
-    Phase 4 turns this into the fault-isolated multi-sport loop with one
-    shared synthesis batch; until then the registry holds only soccer, so
-    behavior is identical to the single-sport script.
+    A sport's exception during prepare or finish is caught and logged so it
+    can't kill its siblings; a quiet exit (None from prepare) is not a failure.
+    Returns 1 if ANY sport failed, else 0.
     """
-    rc = 0
+    client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    failed = False
+
+    # Phase 1: prepare every sport independently (cheap stages, fault-isolated).
+    preps = {}
     for profile in get_profiles():
-        rc = max(rc, run_sport(profile))
-    return rc
+        try:
+            prep = prepare_sport(client, profile)
+        except Exception as exc:  # noqa: BLE001 — one sport must not sink the rest
+            print(f"[{profile.key}] sport failed: {exc}")
+            failed = True
+            continue
+        if prep is not None:  # None = quiet exit, not a failure
+            preps[profile.key] = prep
+
+    # Phase 2: ONE synthesis batch for every prepared sport.
+    if preps:
+        jobs = {key: {"profile": prep["profile"], "user": prep["user"]}
+                for key, prep in preps.items()}
+        results = run_synthesis(client, jobs)
+
+        # Phase 3: finish + alert each sport independently (fault-isolated).
+        for key, prep in preps.items():
+            try:
+                finish_sport(prep, results[key])
+            except Exception as exc:  # noqa: BLE001
+                print(f"[{key}] sport failed: {exc}")
+                failed = True
+
+    return 1 if failed else 0

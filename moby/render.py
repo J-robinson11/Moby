@@ -45,13 +45,18 @@ def build_discord_payload(result: dict) -> dict:
     scanned = f" · {n_eval} markets" if n_eval else ""
     tr_note = f" · {tr.get('note')}" if tr.get("note") else ""
     slot = result.get("_run_slot") or run_slot_label()
+    # Multi-sport: prefix the header with the sport label when the pipeline
+    # tags the result (e.g. "World Cup"). Absent → the original single-sport
+    # titles, byte-for-byte, so existing soccer output never drifts.
+    label = result.get("_sport_label")
+    head = f"🐋 Moby · {label}" if label else "🐋 Moby"
 
     picks = flatten_picks(result)
     if not picks:
         return {
             "username": "Moby",
             "embeds": [{
-                "title": f"🐋 Moby — {slot} run · no bets",
+                "title": f"{head} — {slot} run · no bets",
                 "description": _clean(summary, 400),
                 "color": 0x95A5A6,
                 "fields": [{"name": "Watchlist", "value": _fmt_list(watchlist), "inline": False}],
@@ -68,7 +73,7 @@ def build_discord_payload(result: dict) -> dict:
     )
     embeds = [{
         "username": "Moby",
-        "title": f"🐋 Moby — {slot} run",
+        "title": f"{head} — {slot} run",
         "description": f"{_clean(summary, 280)}\n\n**{header_lines}**",
         "color": 0x3498DB,
         "footer": {"text": f"Stakes in units (1u≈1% bankroll, ¼-Kelly) · futures = glance{scanned}{tr_note}"},

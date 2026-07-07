@@ -10,11 +10,16 @@ from moby.polymarket import fetch_market_resolution
 from moby.tracklog import _log_path
 
 
-def load_track_record(grade_limit: int = 25) -> dict:
+def load_track_record(grade_limit: int = 25, sport: str = None) -> dict:
     """Read signals_log.jsonl and grade resolved past picks (best-effort).
 
     Returns a compact summary used as a sentiment factor: how Moby's prior
     calls have actually resolved, by category, plus a few recent wins.
+
+    Multi-sport: pass ``sport`` to scope both grading AND total_logged to that
+    sport's rows only, so one sport's track record never leaks into another's
+    prompt. Rows predating the sport field are soccer (matching the log's
+    write-side default).
     """
     log_path = _log_path()
     if not os.path.exists(log_path):
@@ -29,6 +34,9 @@ def load_track_record(grade_limit: int = 25) -> dict:
                     rows.append(json.loads(line))
     except Exception:  # noqa: BLE001
         return {"status": "unreadable", "note": "Could not read signal log."}
+
+    if sport is not None:
+        rows = [r for r in rows if r.get("sport", "soccer") == sport]
 
     graded = {"win": 0, "loss": 0}
     by_cat = {}

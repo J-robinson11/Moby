@@ -15,9 +15,13 @@ def _log_path() -> str:
     )
 
 
-def log_signals(result: dict, run_at: str, cid_by_market: dict) -> None:
+def log_signals(result: dict, run_at: str, cid_by_market: dict, sport: str = None) -> None:
     """Append each pick to signals_log.jsonl, enriched with condition_id so it
-    can be graded (win/loss) on future runs."""
+    can be graded (win/loss) on future runs.
+
+    Multi-sport: each row carries its ``sport`` so grading can be scoped per
+    sport. Rows predating this field are soccer, so an omitted sport defaults
+    to "soccer" (matching load_track_record's read-side default)."""
     log_path = _log_path()
     picks = flatten_picks(result)
     if not picks:
@@ -27,6 +31,7 @@ def log_signals(result: dict, run_at: str, cid_by_market: dict) -> None:
             cid = cid_by_market.get(p.get("market", ""), "")
             record = {
                 "run_at": run_at,
+                "sport": sport or "soccer",
                 "market": p.get("market", ""),
                 "smart_money_side": p.get("pick", ""),
                 "conviction": p.get("conviction", ""),
@@ -37,18 +42,3 @@ def log_signals(result: dict, run_at: str, cid_by_market: dict) -> None:
             }
             f.write(json.dumps(record) + "\n")
     print(f"Logged {len(picks)} pick(s) to signals_log.jsonl")
-
-
-def commit_log() -> None:
-    """Persistence of signals_log.jsonl is handled by the workflow, not here.
-
-    Moby's log used to be committed straight to the default branch on every run
-    (a stream of ``chore: log smart-money signals`` commits on ``main``). That
-    conflicts with protecting ``main``, so persistence now lives in the CI
-    workflow, which restores the log from the dedicated ``data`` branch before a
-    run and force-pushes the updated log back to ``data`` after — keeping ``main``
-    free of automated log commits. This function is intentionally a no-op; the
-    run still writes ``signals_log.jsonl`` to disk via ``log_signals()``.
-    """
-    if os.path.exists(_log_path()):
-        print("signals_log.jsonl written; persistence handled by the workflow's data-branch step")
