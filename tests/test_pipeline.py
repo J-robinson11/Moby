@@ -136,3 +136,18 @@ def test_finish_sport_normal_run_logs(monkeypatch):
     pipeline.finish_sport(prep, result)
     assert "_test_run" not in result
     assert logged == ["t"]
+
+
+def test_finish_sport_reports_combined_stage_cost(monkeypatch, capsys):
+    # The per-sport Cost line must combine Stage B (news, from prep) with
+    # Stage C (synthesis, from the result's _cost) — the JSON's _cost alone
+    # undersells the run (it only covers synthesis).
+    monkeypatch.setattr(pipeline, "send_alert", lambda result, profile=None: None)
+    monkeypatch.setattr(pipeline, "log_signals", lambda *a, **kw: None)
+    prep, result = _finish_fixture()
+    prep["news_cost"] = 0.0892
+    result["_cost"] = {"total_cost": 0.0295}
+    pipeline.finish_sport(prep, result)
+    assert result["_cost_run_total"] == 0.1187
+    out = capsys.readouterr().out
+    assert "Cost: $0.1187 this sport (news $0.0892 + synthesis $0.0295)" in out
