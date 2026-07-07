@@ -2,8 +2,9 @@
 import os
 
 from moby.sports.soccer import SOCCER
+from moby.sports.wnba import WNBA
 
-SPORTS = {SOCCER.key: SOCCER}
+SPORTS = {SOCCER.key: SOCCER, WNBA.key: WNBA}
 
 
 def get_profiles(env: str = None) -> list:
