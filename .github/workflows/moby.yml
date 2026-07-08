@@ -75,6 +75,7 @@ jobs:
           # sport only runs when it has live/upcoming games in the window).
           MOBY_SPORTS: "soccer,wnba,ufc,nfl,nba"
           BATCH_MODE: "1"
+          BATCH_WAIT_MIN: "5"
           ANTHROPIC_MODEL: ${{ secrets.ANTHROPIC_MODEL }}   # legacy synth override, honored if set
           DRY_RUN: ${{ github.event.inputs.dry_run || '0' }}
           TEST_RUN: ${{ github.event.inputs.test || '0' }}
