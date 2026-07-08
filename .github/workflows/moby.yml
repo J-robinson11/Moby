@@ -65,6 +65,7 @@ jobs:
           DISCORD_WEBHOOK_URL_UFC: ${{ secrets.DISCORD_WEBHOOK_URL_UFC }}
           DISCORD_WEBHOOK_URL_NFL: ${{ secrets.DISCORD_WEBHOOK_URL_NFL }}
           DISCORD_WEBHOOK_URL_NBA: ${{ secrets.DISCORD_WEBHOOK_URL_NBA }}
+          DISCORD_WEBHOOK_URL_MLB: ${{ secrets.DISCORD_WEBHOOK_URL_MLB }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
           TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
@@ -73,7 +74,7 @@ jobs:
           # --- Multi-sport / model tiers ---
           # All sports enabled; the season gate keeps dark sports at $0 (a
           # sport only runs when it has live/upcoming games in the window).
-          MOBY_SPORTS: "soccer,wnba,ufc,nfl,nba"
+          MOBY_SPORTS: "soccer,wnba,ufc,nfl,nba,mlb"
           BATCH_MODE: "1"
           ANTHROPIC_MODEL: ${{ secrets.ANTHROPIC_MODEL }}   # legacy synth override, honored if set
           DRY_RUN: ${{ github.event.inputs.dry_run || '0' }}
