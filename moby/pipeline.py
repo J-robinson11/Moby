@@ -148,6 +148,9 @@ def prepare_sport(client, profile) -> dict | None:
         "track_record": track_record,
         "slot": slot,
         "now": now,
+        # Stage B spend, carried forward so finish_sport can report the true
+        # per-sport total (the result's _cost only covers Stage C synthesis).
+        "news_cost": float((news_brief.get("_cost") or {}).get("total_cost", 0.0)),
     }
 
 
@@ -205,6 +208,14 @@ def finish_sport(prep: dict, result: dict) -> None:
     staked = annotate_units(result)
     if staked:
         print(f"[{profile.key}] Sized {staked} pick(s) with a suggested unit stake.")
+
+    # The one-line spend summary the single-file engine used to print — the
+    # staged engine's per-stage lines don't add up for you, so this does.
+    news_cost = float(prep.get("news_cost", 0.0))
+    synth_cost = float((result.get("_cost") or {}).get("total_cost", 0.0))
+    result["_cost_run_total"] = round(news_cost + synth_cost, 4)
+    print(f"[{profile.key}] Cost: ${result['_cost_run_total']:.4f} this sport "
+          f"(news ${news_cost:.4f} + synthesis ${synth_cost:.4f})")
 
     print(f"[{profile.key}] Summary:", result.get("summary", ""))
     print(f"[{profile.key}] Watchlist:", result.get("watchlist", []))
@@ -269,11 +280,14 @@ def main() -> int:
         results = run_synthesis(client, jobs)
 
         # Phase 3: finish + alert each sport independently (fault-isolated).
+        run_total = 0.0
         for key, prep in preps.items():
             try:
                 finish_sport(prep, results[key])
+                run_total += results[key].get("_cost_run_total", 0.0)
             except Exception as exc:  # noqa: BLE001
                 print(f"[{key}] sport failed: {exc}")
                 failed = True
+        print(f"Run cost, all sports: ${round(run_total, 4):.4f}")
 
     return 1 if failed else 0
