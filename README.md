@@ -103,7 +103,7 @@ still works exactly as before.
 | `moby/markets.py`, `smartmoney.py`, `polymarket.py` | Fetch, classify, sharp-money weighting, Gamma/Data API clients |
 | `moby/picks.py`, `render.py`, `alerts.py`, `tracklog.py` | Stage D: prune/tag/size, Discord payload, dispatch, signal logging |
 | `moby/windows.py`, `factors.py`, `config.py` | Run-window math, track-record/X factors, env-knob precedence |
-| `moby/sports/` | The sport adapters — `base.py` (the `SportProfile` contract), `soccer.py`, `wnba.py`, `__init__.py` (registry) |
+| `moby/sports/` | The sport adapters — `base.py` (the `SportProfile` contract), `soccer.py`, `wnba.py`, `mlb.py`, ..., `__init__.py` (registry) |
 | `tests/` | The pytest suite (see [Testing](#testing)); `tests/fixtures/` holds the golden Discord payloads |
 | `.github/workflows/moby.yml` | The 3×/day schedule + Discord failure alert; restores/persists the track record on the `data` branch |
 | `.github/workflows/ci.yml` | Fast check on every push (`pytest -q` + `py_compile`) |
@@ -222,7 +222,7 @@ Set as repo secrets or edit the `env:` block in `moby.yml`:
 
 | Variable | Default | What it does |
 |----------|---------|--------------|
-| `MOBY_SPORTS` | `soccer` | Comma-separated sport keys to run this cycle (the workflow sets all five: `soccer,wnba,ufc,nfl,nba`). An unknown key is a startup error |
+| `MOBY_SPORTS` | `soccer` | Comma-separated sport keys to run this cycle (the workflow sets all six: `soccer,wnba,ufc,nfl,nba,mlb`). An unknown key is a startup error |
 | `REQUIRE_GAME_WINDOW` | `1` | The season gate: a sport only proceeds when it has a live game or one starting within `WINDOW_HOURS` — futures-only sports (NFL in July) quiet-exit at $0, before the holder fetches. `0` disables |
 | `TEST_RUN` | `0` | `1` = post with the `🧪 TEST` header badge and skip signal logging (set automatically by the `test` dispatch input) |
 | `MODEL_SYNTH` | `claude-sonnet-4-6` | Stage C synthesis model. The legacy `ANTHROPIC_MODEL` secret is still honored for this if `MODEL_SYNTH` is unset |

@@ -6,6 +6,7 @@ from moby.sports.wnba import WNBA
 from moby.sports.ufc import UFC
 from moby.sports.nfl import NFL
 from moby.sports.nba import NBA
+from moby.sports.mlb import MLB
 
 SPORTS = {
     SOCCER.key: SOCCER,
@@ -13,6 +14,7 @@ SPORTS = {
     UFC.key: UFC,
     NFL.key: NFL,
     NBA.key: NBA,
+    MLB.key: MLB,
 }
 
 
