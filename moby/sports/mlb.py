@@ -98,5 +98,6 @@ MLB = SportProfile(
     defaults={
         "MAX_GAME_PROPS_PER_GAME": "8",   # ML + best spreads + 2-3 totals + a 1st-5
         "MAX_PLAYER_PROPS_PER_GAME": "6", # the sharpest props, not 2 per batter
+        "WINDOW_HOURS": "18",             # ~15 games EVERY day — same-day horizon
     },
 )

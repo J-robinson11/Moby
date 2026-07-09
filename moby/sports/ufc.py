@@ -91,8 +91,14 @@ UFC = SportProfile(
     sport_prompt=SPORT_PROMPT,
     search_hints=SEARCH_HINTS,
     # Fight-market liquidity is thin (median ≈ $47 live); env still overrides
-    # (env > defaults > global, per config.knob).
-    defaults={"MIN_LIQUIDITY": "250", "MIN_SMART_MONEY_USD": "1000"},
+    # (env > defaults > global, per config.knob). WINDOW_HOURS=96 wakes UFC on
+    # fight week (cards run ~weekly, usually Saturday; a Tuesday card is ~93h
+    # out) so early sharp money on a fight surfaces days ahead, not fight-day.
+    defaults={
+        "MIN_LIQUIDITY": "250",
+        "MIN_SMART_MONEY_USD": "1000",
+        "WINDOW_HOURS": "96",
+    },
     # Fight events are already one-per-fight and never carry a " - " suffix, so
     # the default _game_key is a harmless no-op — no override needed.
     game_key=None,

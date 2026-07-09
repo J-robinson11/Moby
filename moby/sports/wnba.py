@@ -72,6 +72,11 @@ WNBA = SportProfile(
     sport_prompt=SPORT_PROMPT,
     search_hints=SEARCH_HINTS,
     # WNBA liquidity is thinner than the World Cup; env still overrides (env >
-    # defaults > global, per config.knob).
-    defaults={"MIN_LIQUIDITY": "250", "MIN_SMART_MONEY_USD": "1000"},
+    # defaults > global, per config.knob). WINDOW_HOURS stays at the global 18h
+    # — WNBA plays a near-daily schedule, so same-day is the right horizon.
+    defaults={
+        "MIN_LIQUIDITY": "250",
+        "MIN_SMART_MONEY_USD": "1000",
+        "WINDOW_HOURS": "18",
+    },
 )

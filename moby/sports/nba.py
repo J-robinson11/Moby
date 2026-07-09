@@ -80,5 +80,10 @@ NBA = SportProfile(
     search_hints=SEARCH_HINTS,
     # NBA regular-season liquidity is deep, but stays conservative like WNBA;
     # env still overrides (env > defaults > global, per config.knob).
-    defaults={"MIN_LIQUIDITY": "250", "MIN_SMART_MONEY_USD": "1000"},
+    # WINDOW_HOURS stays 18h — the NBA plays a near-daily schedule.
+    defaults={
+        "MIN_LIQUIDITY": "250",
+        "MIN_SMART_MONEY_USD": "1000",
+        "WINDOW_HOURS": "18",
+    },
 )

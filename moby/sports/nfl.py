@@ -87,4 +87,8 @@ NFL = SportProfile(
     live_grace_min=210,                  # ~3.5h game
     sport_prompt=SPORT_PROMPT,
     search_hints=SEARCH_HINTS,
+    # Games cluster Thu/Sun/Mon with the big Sunday slate; 48h lets Friday and
+    # Saturday runs preview Sunday (where lines move most) instead of only
+    # catching games same-day. Env WINDOW_HOURS still wins.
+    defaults={"WINDOW_HOURS": "48"},
 )
