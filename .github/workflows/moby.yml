@@ -20,6 +20,10 @@ on:
         description: "Set to 1 to post with a 🧪 TEST badge and skip signal logging"
         required: false
         default: "0"
+      sports:
+        description: "Only run these sports, comma-separated (soccer, wnba, ufc, nfl, nba, mlb). Empty = all. Combines with test/dry_run."
+        required: false
+        default: ""
 
 jobs:
   moby:
@@ -74,7 +78,11 @@ jobs:
           # --- Multi-sport / model tiers ---
           # All sports enabled; the season gate keeps dark sports at $0 (a
           # sport only runs when it has live/upcoming games in the window).
-          MOBY_SPORTS: "soccer,wnba,ufc,nfl,nba,mlb"
+          # Manual dispatches can narrow to specific sports via the `sports`
+          # input (e.g. "mlb" or "wnba,mlb"); scheduled runs have no inputs,
+          # so they always fall back to the full list. A typo'd key fails the
+          # run loudly at startup (get_profiles) before any network work.
+          MOBY_SPORTS: ${{ github.event.inputs.sports || 'soccer,wnba,ufc,nfl,nba,mlb' }}
           BATCH_MODE: "1"
           BATCH_WAIT_MIN: "5"
           ANTHROPIC_MODEL: ${{ secrets.ANTHROPIC_MODEL }}   # legacy synth override, honored if set
