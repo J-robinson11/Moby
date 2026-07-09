@@ -56,4 +56,8 @@ SOCCER = SportProfile(
     live_grace_min=105,                  # ~75 min played ≈ ~90 min wall clock + margin
     sport_prompt=SPORT_PROMPT,
     search_hints=SEARCH_HINTS,
+    # Knockout rounds have rest days (~44h between a team's games), so the
+    # global 18h window would leave soccer dark on off-days. 48h keeps it awake
+    # to preview the next round the day before. Env WINDOW_HOURS still wins.
+    defaults={"WINDOW_HOURS": "48"},
 )
