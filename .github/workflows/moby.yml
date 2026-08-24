@@ -7,23 +7,23 @@ name: Moby
 # off the top of the hour (:20) to reduce congestion/drift.
 # Nominal fire (UTC) -> expected delivery (CDT = UTC-5, ~1h drift):
 #   11:20 UTC -> ~7:20 AM CT | 16:20 UTC -> ~12:20 PM CT | 21:20 UTC -> ~5:20 PM CT
-on:
-  schedule:
-    - cron: "20 11,16,21 * * *"
-  workflow_dispatch:      # manual run from the Actions tab
-    inputs:
-      dry_run:
-        description: "Set to 1 to print the slate instead of posting to Discord"
-        required: false
-        default: "0"
-      test:
-        description: "Set to 1 to post with a 🧪 TEST badge and skip signal logging"
-        required: false
-        default: "0"
-      sports:
-        description: "Only run these sports, comma-separated (soccer, wnba, ufc, nfl, nba, mlb). Empty = all. Combines with test/dry_run."
-        required: false
-        default: ""
+#on:
+  #schedule:
+   # - cron: "20 11,16,21 * * *"
+  #workflow_dispatch:      # manual run from the Actions tab
+    #inputs:
+      #dry_run:
+        #description: "Set to 1 to print the slate instead of posting to Discord"
+        #required: false
+        #default: "0"
+      #test:
+        #description: "Set to 1 to post with a 🧪 TEST badge and skip signal logging"
+        #required: false
+        #default: "0"
+      #sports:
+        #description: "Only run these sports, comma-separated (soccer, wnba, ufc, nfl, nba, mlb). Empty = all. Combines with test/dry_run."
+        #required: false
+        #default: ""
 
 jobs:
   moby:
